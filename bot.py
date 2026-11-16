@@ -1,21 +1,32 @@
 
 import os
 import json
+import time
 import base64
-import requests
+import logging
 from datetime import datetime, timezone
 
+import requests
+
+# ================= CONFIG =================
+
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
-ADMIN_ID = str(os.environ["TELEGRAM_CHAT_ID"])
+ADMIN_ID = os.environ["TELEGRAM_CHAT_ID"]
 WORKER_URL = os.environ["CLOUDFLARE_WORKER_URL"].rstrip("/")
-WORKER_SECRET = os.environ["WEBHOOK_SECRET"]
+WEBHOOK_SECRET = os.environ["WEBHOOK_SECRET"]
+
 GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
 GITHUB_REPOSITORY = os.environ["GITHUB_REPOSITORY"]
-GITHUB_BRANCH = os.getenv("GITHUB_REF_NAME", "main")
+GITHUB_BRANCH = os.environ.get("GITHUB_REF_NAME", "main")
 
-SYMBOLS = {
-    "EURUSD": "https://biquote.io/api/EURUSD/ohlc?interval=30m&limit=200",
-    "XAUUSD": "https://biquote.io/api/XAUUSD/ohlc?interval=30m&limit=200",
+SYMBOLS = ["EURUSD", "XAUUSD"]
+
+TIMEFRAMES = {
+    "M5": "5m",
+    "M15": "15m",
+    "M30": "30m",
+    "H1": "1h",
+    "H4": "4h",
 }
 
 ATR_PERIOD = 14
@@ -23,63 +34,84 @@ SUPERTREND_FACTOR = 2.5
 SL_ATR_MULTIPLIER = 1.5
 RR_TARGETS = (1.0, 2.0, 3.0)
 
+API_URL = "https://biquote.io/api/{symbol}/ohlc"
 STATE_FILE = "bot_state.json"
-session = requests.Session()
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s"
+)
+
+session = requests.Session()
+session.headers.update({"User-Agent": "ForexSignalsBot/2.0"})
+
+
+# ================= TELEGRAM =================
 
 def telegram_send(chat_id, message):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     response = session.post(
         url,
-        json={"chat_id": chat_id, "text": message},
+        json={
+            "chat_id": str(chat_id),
+            "text": message,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        },
         timeout=20,
     )
     response.raise_for_status()
+    return response.json()
+
+
+# ================= GITHUB STATE =================
+
+def github_file_request():
+    url = (
+        "https://api.github.com/repos/"
+        f"{GITHUB_REPOSITORY}/contents/{STATE_FILE}"
+    )
+    headers = {
+        "Authorization": f"Bearer {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github+json",
+    }
+    return url, headers
 
 
 def load_state():
-    url = (
-        f"https://api.github.com/repos/{GITHUB_REPOSITORY}"
-        f"/contents/{STATE_FILE}"
-    )
-    headers = {
-        "Authorization": f"Bearer {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github+json",
-    }
+    url, headers = github_file_request()
 
-    response = session.get(
-        url,
-        headers=headers,
-        params={"ref": GITHUB_BRANCH},
-        timeout=20,
-    )
+    try:
+        response = session.get(
+            url,
+            headers=headers,
+            params={"ref": GITHUB_BRANCH},
+            timeout=20,
+        )
 
-    if response.status_code == 404:
-        return {"last_signals": {}, "heartbeat_date": ""}, None
+        if response.status_code == 404:
+            return {"signals": {}, "heartbeat_date": ""}, None
 
-    response.raise_for_status()
-    data = response.json()
-    content = base64.b64decode(data["content"]).decode("utf-8")
+        response.raise_for_status()
+        result = response.json()
 
-    return json.loads(content), data["sha"]
+        content = base64.b64decode(result["content"]).decode("utf-8")
+        return json.loads(content), result["sha"]
+
+    except Exception:
+        logging.exception("State yuklashda xato")
+        return {"signals": {}, "heartbeat_date": ""}, None
 
 
 def save_state(state, sha):
-    url = (
-        f"https://api.github.com/repos/{GITHUB_REPOSITORY}"
-        f"/contents/{STATE_FILE}"
-    )
-    headers = {
-        "Authorization": f"Bearer {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github+json",
-    }
+    url, headers = github_file_request()
 
     content = base64.b64encode(
         json.dumps(state, ensure_ascii=False, indent=2).encode("utf-8")
     ).decode("utf-8")
 
     payload = {
-        "message": "Update signal state",
+        "message": "Update forex bot state",
         "content": content,
         "branch": GITHUB_BRANCH,
     }
@@ -96,34 +128,48 @@ def save_state(state, sha):
     response.raise_for_status()
 
 
-def approved_users():
-    url = f"{WORKER_URL}/approved-users"
+# ================= USERS =================
+
+def get_approved_users():
     response = session.get(
-        url,
-        headers={"X-Worker-Secret": WORKER_SECRET},
+        f"{WORKER_URL}/approved-users",
+        headers={"X-Worker-Secret": WEBHOOK_SECRET},
         timeout=20,
     )
     response.raise_for_status()
 
-    data = response.json()
-    users = [str(x) for x in data.get("users", [])]
+    users = response.json().get("users", [])
+    return list(set([str(ADMIN_ID)] + [str(x) for x in users]))
 
-    return sorted(set(users + [ADMIN_ID]))
 
-def get_candles(url):
-    response = session.get(url, timeout=25)
+# ================= MARKET DATA =================
+
+def get_candles(symbol, interval):
+    url = API_URL.format(symbol=symbol)
+
+    response = session.get(
+        url,
+        params={"interval": interval, "limit": 300},
+        timeout=25,
+    )
     response.raise_for_status()
-    data = response.json()
-    print("API JAVOBI:", str(data)[:3000])
 
-    if isinstance(data, dict):
-        data = data.get("bars", data.get("data", data.get("candles", data.get("result", []))))
-    if not isinstance(data, list):
-        raise ValueError("OHLC ma'lumotlari ro'yxat emas")
+    payload = response.json()
+
+    if isinstance(payload, dict):
+        bars = payload.get(
+            "bars",
+            payload.get("data", payload.get("candles", []))
+        )
+    else:
+        bars = payload
+
+    if not isinstance(bars, list):
+        raise ValueError("API candles ro'yxatini bermadi")
 
     candles = []
 
-    for item in data:
+    for item in bars:
         if not isinstance(item, dict):
             continue
 
@@ -132,66 +178,82 @@ def get_candles(url):
 
         try:
             candle = {
-                "time": str(item.get("openTime", item.get("timestamp", item.get("time", "")))),
-                "open": float(item.get("open", item.get("o"))),
-                "high": float(item.get("high", item.get("h"))),
-                "low": float(item.get("low", item.get("l"))),
-                "close": float(item.get("close", item.get("c"))),
+                "time": str(
+                    item.get(
+                        "openTime",
+                        item.get("timestamp", item.get("time", ""))
+                    )
+                ),
+                "open": float(item["open"]),
+                "high": float(item["high"]),
+                "low": float(item["low"]),
+                "close": float(item["close"]),
             }
-            if candle["time"]:
-                candles.append(candle)
-        except (TypeError, ValueError):
+
+            candles.append(candle)
+
+        except (KeyError, TypeError, ValueError):
             continue
 
     candles.sort(key=lambda x: x["time"])
 
-    if len(candles) < ATR_PERIOD + 3:
-        raise ValueError("Yopilgan shamlar yetarli emas")
+    if len(candles) < 60:
+        raise ValueError(
+            f"{symbol} {interval}: yetarli yopilgan sham yo'q "
+            f"({len(candles)} ta)"
+        )
 
     return candles
 
 
-def calculate_atr(candles):
-    trs = []
+# ================= INDICATORS =================
+
+def calculate_atr(candles, period):
+    tr = []
 
     for i, candle in enumerate(candles):
         if i == 0:
-            tr = candle["high"] - candle["low"]
+            value = candle["high"] - candle["low"]
         else:
             previous_close = candles[i - 1]["close"]
-            tr = max(
+            value = max(
                 candle["high"] - candle["low"],
                 abs(candle["high"] - previous_close),
                 abs(candle["low"] - previous_close),
             )
-        trs.append(tr)
+        tr.append(value)
 
     atr = [None] * len(candles)
-    period = ATR_PERIOD
 
-    atr[period - 1] = sum(trs[:period]) / period
+    if len(tr) <= period:
+        return atr
 
-    for i in range(period, len(candles)):
+    atr[period - 1] = sum(tr[:period]) / period
+
+    for i in range(period, len(tr)):
         atr[i] = (
-            atr[i - 1] * (period - 1) + trs[i]
+            atr[i - 1] * (period - 1) + tr[i]
         ) / period
 
     return atr
 
 
 def calculate_supertrend(candles):
-    atr = calculate_atr(candles)
+    atr = calculate_atr(candles, ATR_PERIOD)
     upper = [None] * len(candles)
     lower = [None] * len(candles)
-    direction = [0] * len(candles)
+    direction = [None] * len(candles)
 
-    for i, candle in enumerate(candles):
+    for i in range(len(candles)):
         if atr[i] is None:
             continue
 
-        midpoint = (candle["high"] + candle["low"]) / 2
-        basic_upper = midpoint + SUPERTREND_FACTOR * atr[i]
-        basic_lower = midpoint - SUPERTREND_FACTOR * atr[i]
+        middle = (
+            candles[i]["high"] + candles[i]["low"]
+        ) / 2
+
+        basic_upper = middle + SUPERTREND_FACTOR * atr[i]
+        basic_lower = middle - SUPERTREND_FACTOR * atr[i]
 
         if i == ATR_PERIOD - 1:
             upper[i] = basic_upper
@@ -199,114 +261,217 @@ def calculate_supertrend(candles):
             direction[i] = 1
             continue
 
-        previous_upper = upper[i - 1]
-        previous_lower = lower[i - 1]
         previous_close = candles[i - 1]["close"]
 
         upper[i] = (
             basic_upper
-            if basic_upper < previous_upper or previous_close > previous_upper
-            else previous_upper
+            if basic_upper < upper[i - 1]
+            or previous_close > upper[i - 1]
+            else upper[i - 1]
         )
 
         lower[i] = (
             basic_lower
-            if basic_lower > previous_lower or previous_close < previous_lower
-            else previous_lower
+            if basic_lower > lower[i - 1]
+            or previous_close < lower[i - 1]
+            else lower[i - 1]
         )
 
-        if direction[i - 1] == 1:
-            direction[i] = -1 if candle["close"] > upper[i] else 1
+        if direction[i - 1] == -1:
+            direction[i] = (
+                1 if candles[i]["close"] > upper[i]
+                else -1
+            )
         else:
-            direction[i] = 1 if candle["close"] < lower[i] else -1
+            direction[i] = (
+                -1 if candles[i]["close"] < lower[i]
+                else 1
+            )
 
     return direction, atr
 
 
-def build_signal(symbol, candles):
-    direction, atr = calculate_supertrend(candles)
-
-    i = len(candles) - 1
-    previous = i - 1
-
-    if atr[i] is None:
+def calculate_ema(values, period):
+    if len(values) < period:
         return None
 
-    if direction[i] == direction[previous]:
+    ema = sum(values[:period]) / period
+    multiplier = 2 / (period + 1)
+
+    for value in values[period:]:
+        ema = (value - ema) * multiplier + ema
+
+    return ema
+
+
+# ================= SIGNAL =================
+
+def build_signal(symbol, timeframe, interval):
+    candles = get_candles(symbol, interval)
+    directions, atr_values = calculate_supertrend(candles)
+
+    if directions[-1] is None or directions[-2] is None:
         return None
 
-    side = "BUY" if direction[i] == -1 else "SELL"
-    entry = candles[i]["close"]
-    risk = atr[i] * SL_ATR_MULTIPLIER
+    previous_direction = directions[-2]
+    current_direction = directions[-1]
 
-    if side == "BUY":
-        sl = entry - risk
-        tps = [entry + risk * rr for rr in RR_TARGETS]
+    if previous_direction == current_direction:
+        return None
+
+    closes = [c["close"] for c in candles]
+    ema50 = calculate_ema(closes, 50)
+
+    if ema50 is None:
+        return None
+
+    price = closes[-1]
+    atr = atr_values[-1]
+
+    if atr is None or atr <= 0:
+        return None
+
+    if current_direction == 1:
+        side = "BUY"
+
+        if price <= ema50:
+            return None
+
+        entry = price
+        sl = entry - atr * SL_ATR_MULTIPLIER
+        risk = entry - sl
+
+        tp1 = entry + risk * RR_TARGETS[0]
+        tp2 = entry + risk * RR_TARGETS[1]
+        tp3 = entry + risk * RR_TARGETS[2]
+
     else:
-        sl = entry + risk
-        tps = [entry - risk * rr for rr in RR_TARGETS]
+        side = "SELL"
+
+        if price >= ema50:
+            return None
+
+        entry = price
+        sl = entry + atr * SL_ATR_MULTIPLIER
+        risk = sl - entry
+
+        tp1 = entry - risk * RR_TARGETS[0]
+        tp2 = entry - risk * RR_TARGETS[1]
+        tp3 = entry - risk * RR_TARGETS[2]
+
+    candle_time = candles[-1]["time"]
 
     return {
         "symbol": symbol,
+        "timeframe": timeframe,
         "side": side,
         "entry": entry,
         "sl": sl,
-        "tps": tps,
-        "time": candles[i]["time"],
+        "tp1": tp1,
+        "tp2": tp2,
+        "tp3": tp3,
+        "candle_time": candle_time,
     }
 
 
+# ================= MESSAGE =================
+
+def format_price(symbol, value):
+    digits = 3 if symbol == "XAUUSD" else 5
+    return f"{value:.{digits}f}"
+
+
 def format_signal(signal):
-    digits = 3 if signal["symbol"] == "XAUUSD" else 5
+    symbol = signal["symbol"]
+
+    emoji = "🟢" if signal["side"] == "BUY" else "🔴"
 
     return (
-        f"🚨 {signal['symbol']} M30 — {signal['side']}\n\n"
-        f"📍 Entry: {signal['entry']:.{digits}f}\n"
-        f"🛑 SL: {signal['sl']:.{digits}f}\n\n"
-        f"🎯 TP1: {signal['tps'][0]:.{digits}f}\n"
-        f"🎯 TP2: {signal['tps'][1]:.{digits}f}\n"
-        f"🎯 TP3: {signal['tps'][2]:.{digits}f}\n\n"
-        f"⏱ Time: {signal['time']}\n"
-        f"⚠️ Demo hisobda tekshiring. Signal kafolatlangan emas."
+        f"{emoji} <b>{symbol} — {signal['side']}</b>\n"
+        f"⏱ Timeframe: <b>{signal['timeframe']}</b>\n"
+        f"━━━━━━━━━━━━━━\n"
+        f"🎯 Entry: <code>{format_price(symbol, signal['entry'])}</code>\n"
+        f"🛑 SL: <code>{format_price(symbol, signal['sl'])}</code>\n"
+        f"✅ TP1: <code>{format_price(symbol, signal['tp1'])}</code>\n"
+        f"✅ TP2: <code>{format_price(symbol, signal['tp2'])}</code>\n"
+        f"✅ TP3: <code>{format_price(symbol, signal['tp3'])}</code>\n"
+        f"━━━━━━━━━━━━━━\n"
+        f"📊 Strategiya: Supertrend + EMA50\n"
+        f"🕯 Yopilgan sham asosida\n"
+        f"⚠️ Demo hisobda tekshiring."
     )
 
 
+# ================= MAIN =================
+
 def main():
     state, sha = load_state()
-    users = approved_users()
+    state.setdefault("signals", {})
+    state.setdefault("heartbeat_date", "")
 
-    for symbol, url in SYMBOLS.items():
-        candles = get_candles(url)
-        signal = build_signal(symbol, candles)
+    users = get_approved_users()
+    sent_count = 0
+    errors = []
 
-        if signal is None:
-            continue
+    for symbol in SYMBOLS:
+        for timeframe, interval in TIMEFRAMES.items():
+            key = f"{symbol}_{timeframe}"
 
-        signal_key = f"{symbol}_{signal['time']}"
-
-        if state["last_signals"].get(symbol) == signal_key:
-            continue
-
-        message = format_signal(signal)
-
-        for user_id in users:
             try:
-                telegram_send(user_id, message)
+                signal = build_signal(symbol, timeframe, interval)
+
+                if signal is None:
+                    continue
+
+                signature = (
+                    f"{signal['candle_time']}_{signal['side']}"
+                )
+
+                if state["signals"].get(key) == signature:
+                    continue
+
+                message = format_signal(signal)
+
+                for user_id in users:
+                    try:
+                        telegram_send(user_id, message)
+                    except Exception:
+                        logging.exception(
+                            f"Telegram yuborishda xato: {user_id}"
+                        )
+
+                state["signals"][key] = signature
+                sent_count += 1
+
             except Exception as error:
-                print(f"Telegram yuborish xatosi {user_id}: {error}")
+                logging.exception(f"{key} xatosi")
+                errors.append(f"{key}: {str(error)[:120]}")
 
-        state["last_signals"][symbol] = signal_key
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-    today = datetime.now(timezone.utc).date().isoformat()
-
-    if state.get("heartbeat_date") != today:
+    if state["heartbeat_date"] != today:
         telegram_send(
             ADMIN_ID,
-            "🟢 Bot ishlayapti! EURUSD va XAUUSD tekshirilmoqda."
+            "🤖 <b>Forex Signals Bot V2 faol</b>\n"
+            "📊 EURUSD va XAUUSD tekshirilmoqda.\n"
+            "⏱ M5 / M15 / M30 / H1 / H4\n"
+            "🕒 Kunlik UTC hisoboti."
         )
         state["heartbeat_date"] = today
 
     save_state(state, sha)
+
+    logging.info(
+        f"Tugadi. Yangi signallar: {sent_count}. "
+        f"Xatolar: {len(errors)}"
+    )
+
+    if errors:
+        telegram_send(
+            ADMIN_ID,
+            "⚠️ <b>Botdagi ayrim timeframe xatolari:</b>\n"
+            + "\n".join(errors[:10])
+        )
 
 
 if __name__ == "__main__":
