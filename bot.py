@@ -110,15 +110,14 @@ def approved_users():
 
     return sorted(set(users + [ADMIN_ID]))
 
-
 def get_candles(url):
     response = session.get(url, timeout=25)
     response.raise_for_status()
     data = response.json()
-print("API JAVOBI:", str(data)[:3000])
+    print("API JAVOBI:", str(data)[:3000])
+
     if isinstance(data, dict):
         data = data.get("data", data.get("candles", data.get("result", [])))
-
     if not isinstance(data, list):
         raise ValueError("OHLC ma'lumotlari ro'yxat emas")
 
