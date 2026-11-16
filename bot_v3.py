@@ -501,6 +501,7 @@ def get_snapshot(symbol, timeframe, interval):
 
 # =============== SIGNAL SCORE ===============
 
+
 def calculate_score(side, snapshot, h1, h4, index=-1):
     candles = snapshot["candles"]
 
@@ -513,46 +514,48 @@ def calculate_score(side, snapshot, h1, h4, index=-1):
     adx = snapshot["adx"][i]
     direction = snapshot["direction"][i]
 
-    if any(x is None for x in [
-        ema50, ema200, rsi, adx, direction
-    ]):
+    if any(x is None for x in [ema50, rsi, adx, direction]):
         return 0
 
     score = 0
 
-    if (side == "BUY" and direction == 1) or (
-        side == "SELL" and direction == -1
-    ):
+    expected = 1 if side == "BUY" else -1
+
+    # Supertrend
+    if direction == expected:
         score += 20
 
+    # EMA50
     if (side == "BUY" and price > ema50) or (
         side == "SELL" and price < ema50
     ):
         score += 10
 
-    if (side == "BUY" and ema50 > ema200) or (
-        side == "SELL" and ema50 < ema200
-    ):
-        score += 20
+    # EMA200 mavjud bo'lsa
+    if ema200 is not None:
+        if (side == "BUY" and ema50 > ema200) or (
+            side == "SELL" and ema50 < ema200
+        ):
+            score += 20
 
+    # RSI
     if (side == "BUY" and 50 < rsi < 75) or (
         side == "SELL" and 25 < rsi < 50
     ):
         score += 10
 
+    # ADX
     if adx >= 15:
         score += 15
 
+    # H1 va H4 tasdig'i
     for higher in (h1, h4):
         hi_direction = higher["direction"][-1]
         hi_ema50 = higher["ema50"][-1]
         hi_ema200 = higher["ema200"][-1]
 
-        if hi_direction is not None:
-            expected = 1 if side == "BUY" else -1
-
-            if hi_direction == expected:
-                score += 5
+        if hi_direction == expected:
+            score += 5
 
         if hi_ema50 is not None and hi_ema200 is not None:
             if (side == "BUY" and hi_ema50 > hi_ema200) or (
@@ -561,6 +564,7 @@ def calculate_score(side, snapshot, h1, h4, index=-1):
                 score += 5
 
     return score
+
 
 
 # =============== BUILD SIGNAL ===============
