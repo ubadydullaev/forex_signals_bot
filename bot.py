@@ -1,6 +1,7 @@
+ 
 import json
 import os
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone
 
 import requests
 
@@ -8,10 +9,10 @@ BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 
 SYMBOLS = {
-    "EURUSD": "EURUSD=X",
-    "XAUUSD": "GC=F",
+    "EURUSD": "https://biquote.io/api/EURUSD/ohlc",
+    "XAUUSD": "https://biquote.io/api/XAUUSD/ohlc",
 }
-INTERVAL_SECONDS = 30 * 60
+
 ATR_PERIOD = 14
 SUPERTREND_FACTOR = 2.5
 SL_ATR_MULTIPLIER = 1.5
@@ -36,56 +37,79 @@ def send_message(text):
     telegram("sendMessage", {"chat_id": CHAT_ID, "text": text})
 
 
-def yahoo_bars(ticker):
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+def biquote_bars(url):
     response = session.get(
         url,
-        params={"range": "5d", "interval": "30m"},
+        params={"interval": "30m", "limit": 200},
         timeout=20,
     )
     response.raise_for_status()
+
     payload = response.json()
-    result = payload.get("chart", {}).get("result")
-    if not result:
-        raise RuntimeError(f"Yahoo Finance ma'lumot bermadi: {ticker}")
+    raw_bars = payload.get("bars", [])
 
-    item = result[0]
-    timestamps = item.get("timestamp") or []
-    quote = item["indicators"]["quote"][0]
+    if not raw_bars:
+        raise RuntimeError("BiQuote sham ma'lumotini bermadi.")
+
     bars = []
-    now_ts = int(datetime.now(timezone.utc).timestamp())
 
-    for i, ts in enumerate(timestamps):
+    for item in raw_bars:
+        # Hozir shakllanayotgan shamni hisobga olmaymiz.
+        if item.get("isOpen") is not False:
+            continue
+
         values = (
-            quote["open"][i], quote["high"][i],
-            quote["low"][i], quote["close"][i],
+            item.get("open"),
+            item.get("high"),
+            item.get("low"),
+            item.get("close"),
         )
+
         if any(value is None for value in values):
             continue
-        # Faqat to'liq yopilgan M30 shamlar.
-        if int(ts) + INTERVAL_SECONDS > now_ts:
-            continue
+
+        bar_dt = datetime.fromisoformat(
+            item["openTime"].replace("Z", "+00:00")
+        )
+
         bars.append({
-            "time": int(ts),
+            "time": int(bar_dt.timestamp()),
             "open": float(values[0]),
             "high": float(values[1]),
             "low": float(values[2]),
             "close": float(values[3]),
         })
+
+    # API yangi shamlarni birinchi qaytaradi.
+    # Hisoblash uchun eski shamlar oldinda bo'lishi kerak.
+    bars.sort(key=lambda bar: bar["time"])
+
+    if len(bars) < ATR_PERIOD + 2:
+        raise RuntimeError(
+            f"Yopilgan shamlar yetarli emas: {len(bars)}"
+        )
+
     return bars
 
 
 def rma(values, length):
     result = [None] * len(values)
+
     if len(values) < length:
         return result
+
     seed = sum(values[:length]) / length
     result[length - 1] = seed
     alpha = 1.0 / length
     previous = seed
+
     for i in range(length, len(values)):
-        previous = alpha * values[i] + (1.0 - alpha) * previous
+        previous = (
+            alpha * values[i]
+            + (1.0 - alpha) * previous
+        )
         result[i] = previous
+
     return result
 
 
@@ -98,6 +122,7 @@ def supertrend(bars):
     closes = [bar["close"] for bar in bars]
 
     true_ranges = []
+
     for i in range(len(bars)):
         if i == 0:
             true_ranges.append(highs[i] - lows[i])
@@ -116,6 +141,7 @@ def supertrend(bars):
     for i in range(len(bars)):
         if atr[i] is None:
             continue
+
         midpoint = (highs[i] + lows[i]) / 2.0
         basic_upper = midpoint + SUPERTREND_FACTOR * atr[i]
         basic_lower = midpoint - SUPERTREND_FACTOR * atr[i]
@@ -132,6 +158,7 @@ def supertrend(bars):
             or closes[i - 1] > final_upper[i - 1]
             else final_upper[i - 1]
         )
+
         final_lower[i] = (
             basic_lower
             if basic_lower > final_lower[i - 1]
@@ -140,20 +167,27 @@ def supertrend(bars):
         )
 
         previous_direction = direction[i - 1]
+
         if previous_direction == 1:
-            direction[i] = -1 if closes[i] > final_upper[i] else 1
+            direction[i] = (
+                -1 if closes[i] > final_upper[i] else 1
+            )
         else:
-            direction[i] = 1 if closes[i] < final_lower[i] else -1
+            direction[i] = (
+                1 if closes[i] < final_lower[i] else -1
+            )
 
     valid = [
         i for i, value in enumerate(direction)
         if value is not None and atr[i] is not None
     ]
+
     if len(valid) < 2:
         return None
 
     current = valid[-1]
     previous = valid[-2]
+
     return {
         "previous_direction": direction[previous],
         "direction": direction[current],
@@ -172,28 +206,38 @@ def build_signal(symbol, result):
         result["previous_direction"] == 1
         and result["direction"] == -1
     )
+
     is_sell = (
         result["previous_direction"] == -1
         and result["direction"] == 1
     )
+
     if not (is_buy or is_sell):
         return None
 
     entry = result["close"]
     risk = result["atr"] * SL_ATR_MULTIPLIER
+
     if risk <= 0:
         return None
 
     if is_buy:
         stop_loss = entry - risk
-        targets = [entry + risk * rr for rr in RR_TARGETS]
+        targets = [
+            entry + risk * rr for rr in RR_TARGETS
+        ]
         side = "BUY"
     else:
         stop_loss = entry + risk
-        targets = [entry - risk * rr for rr in RR_TARGETS]
+        targets = [
+            entry - risk * rr for rr in RR_TARGETS
+        ]
         side = "SELL"
 
-    bar_dt = datetime.fromtimestamp(result["bar_time"], timezone.utc)
+    bar_dt = datetime.fromtimestamp(
+        result["bar_time"], timezone.utc
+    )
+
     return (
         f"📊 {symbol} — {side}\n"
         "⏱ Timeframe: M30\n"
@@ -203,9 +247,11 @@ def build_signal(symbol, result):
         f"TP1: {format_price(targets[0])}\n"
         f"TP2: {format_price(targets[1])}\n"
         f"TP3: {format_price(targets[2])}\n\n"
-        "Hisob: Supertrend (ATR 14, Factor 2.5), SL = ATR × 1.5.\n"
-        "Narxlar Yahoo Finance ma'lumotidan olinadi; ForexClub MT5 narxidan "
-        "farq qilishi mumkin. Bu avtomatik savdo buyrug'i emas."
+        "Hisob: Supertrend (ATR 14, Factor 2.5), "
+        "SL = ATR × 1.5.\n"
+        "Ma'lumot manbasi: BiQuote (Broker 1). "
+        "ForexClub MT5 narxidan farq qilishi mumkin. "
+        "Bu avtomatik savdo buyrug'i emas."
     )
 
 
@@ -224,52 +270,72 @@ def save_state(state):
 
 def main():
     state = load_state()
-    send_message("🟢 Bot ishlayapti! EURUSD va XAUUSD tekshirilmoqda.")
     changed = False
+    today = datetime.now(timezone.utc).date().isoformat()
 
-    for symbol, ticker in SYMBOLS.items():
+    # Kuniga bir marta bot ishlayotganini bildiradi.
+    if state.get("_heartbeat_date") != today:
+        send_message(
+            "🟢 Bot ishlayapti! EURUSD va XAUUSD tekshirilmoqda."
+        )
+        state["_heartbeat_date"] = today
+        changed = True
+
+    errors = state.setdefault("_errors", {})
+
+    for symbol, url in SYMBOLS.items():
         try:
-            bars = yahoo_bars(ticker)
+            bars = biquote_bars(url)
             result = supertrend(bars)
+
             if not result:
                 print(f"{symbol}: yetarli sham ma'lumoti yo'q.")
                 continue
-            errors = state.setdefault("_errors", {})
+
             if errors.get(symbol):
                 send_message(f"🟢 {symbol} qayta ishlayapti!")
                 errors.pop(symbol, None)
-                save_state(state)
+                changed = True
 
             signal = build_signal(symbol, result)
+
             if not signal:
                 print(f"{symbol}: yangi signal yo'q.")
                 continue
 
             bar_time = str(result["bar_time"])
+
             if state.get(symbol) == bar_time:
-                print(f"{symbol}: bu sham signali avval yuborilgan.")
+                print(f"{symbol}: bu signal avval yuborilgan.")
                 continue
 
             send_message(signal)
             state[symbol] = bar_time
             changed = True
             print(f"{symbol}: signal Telegramga yuborildi.")
- 
+
         except Exception as exc:
             print(f"{symbol} xatolik: {exc}")
-    errors = state.setdefault("_errors", {})
-    if not errors.get(symbol):
-        try:
-            send_message(f"🔴 {symbol} ishlamayapti!\nXatolik: {exc}")
-            errors[symbol] = True
-            save_state(state)
-        except Exception as notify_exc:
-            print(f"Xabar yuborishda xatolik: {notify_exc}")
 
-    
+            if not errors.get(symbol):
+                try:
+                    send_message(
+                        f"🔴 {symbol} ishlamayapti!\n"
+                        f"Xatolik: {exc}"
+                    )
+                    errors[symbol] = True
+                    changed = True
+                except Exception as notify_exc:
+                    print(
+                        f"Xabar yuborishda xatolik: {notify_exc}"
+                    )
+
     if changed:
         save_state(state)
 
 
 if __name__ == "__main__":
     main()
+
+
+
