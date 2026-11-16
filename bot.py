@@ -1,6 +1,6 @@
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 
 import requests
 
@@ -234,6 +234,11 @@ def main():
             if not result:
                 print(f"{symbol}: yetarli sham ma'lumoti yo'q.")
                 continue
+                            errors = state.setdefault("_errors", {})
+            if errors.get(symbol):
+                send_message(f"🟢 {symbol} qayta ishlayapti!")
+                errors.pop(symbol, None)
+                save_state(state)
 
             signal = build_signal(symbol, result)
             if not signal:
@@ -251,7 +256,16 @@ def main():
             print(f"{symbol}: signal Telegramga yuborildi.")
 
         except Exception as exc:
-            print(f"{symbol} xatolik: {exc}")
+    print(f"{symbol} xatolik: {exc}")
+    errors = state.setdefault("_errors", {})
+    if not errors.get(symbol):
+        try:
+            send_message(f"🔴 {symbol} ishlamayapti!\nXatolik: {exc}")
+            errors[symbol] = True
+            save_state(state)
+        except Exception as notify_exc:
+            print(f"Xabar yuborishda xatolik: {notify_exc}")
+
 
     if changed:
         save_state(state)
