@@ -224,6 +224,7 @@ def save_state(state):
 
 def main():
     state = load_state()
+    send_message("🟢 Bot ishlayapti! EURUSD va XAUUSD tekshirilmoqda.")
     changed = False
 
     for symbol, ticker in SYMBOLS.items():
