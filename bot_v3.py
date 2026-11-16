@@ -213,13 +213,14 @@ def get_candles(symbol, interval):
 
     candles.sort(key=lambda x: x["time"])
 
-    if len(candles) < 210:
+    if len(candles) < 60:
         raise ValueError(
-            f"{symbol} {interval}: EMA200 uchun "
+            f"{symbol} {interval}: indikatorlar uchun "
             f"shamlar yetarli emas ({len(candles)})"
         )
 
     candle_cache[cache_key] = candles
+    logging.info(f"Candles: {symbol} {interval} = {len(candles)}")
     return candles
 
 
