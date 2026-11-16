@@ -254,9 +254,9 @@ def main():
             state[symbol] = bar_time
             changed = True
             print(f"{symbol}: signal Telegramga yuborildi.")
-
+ 
         except Exception as exc:
-    print(f"{symbol} xatolik: {exc}")
+            print(f"{symbol} xatolik: {exc}")
     errors = state.setdefault("_errors", {})
     if not errors.get(symbol):
         try:
@@ -266,7 +266,7 @@ def main():
         except Exception as notify_exc:
             print(f"Xabar yuborishda xatolik: {notify_exc}")
 
-
+    
     if changed:
         save_state(state)
 
