@@ -31,7 +31,12 @@ TIMEFRAMES = {
 ATR_PERIOD = 14
 SUPERTREND_FACTOR = 2.5
 SL_ATR_MULTIPLIER = 1.5
+
+# Ball 100 foizlik tizimda hisoblanadi
 MIN_SCORE = 65
+
+# Hozircha test rejimi. Telegramga xabar yuborilmaydi.
+TEST_MODE = True
 
 API_URL = "https://biquote.io/api/{symbol}/ohlc"
 STATE_FILE = "bot_v3_state.json"
@@ -42,33 +47,16 @@ logging.basicConfig(
 )
 
 session = requests.Session()
-session.headers.update({"User-Agent": "ForexSignalsBot/3.0"})
+session.headers.update({
+    "User-Agent": "ForexSignalsBot/3.0"
+})
+
 candle_cache = {}
-
-
-# =============== TELEGRAM ===============
-
-def telegram_send(chat_id, message):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-
-    response = session.post(
-        url,
-        json={
-            "chat_id": str(chat_id),
-            "text": message,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True,
-        },
-        timeout=20,
-    )
-
-    response.raise_for_status()
-    return response.json()
 
 
 # =============== GITHUB STATE ===============
 
-def github_file_request():
+def load_state():
     url = (
         "https://api.github.com/repos/"
         f"{GITHUB_REPOSITORY}/contents/{STATE_FILE}"
@@ -79,12 +67,6 @@ def github_file_request():
         "Accept": "application/vnd.github+json",
     }
 
-    return url, headers
-
-
-def load_state():
-    url, headers = github_file_request()
-
     try:
         response = session.get(
             url,
@@ -94,65 +76,20 @@ def load_state():
         )
 
         if response.status_code == 404:
-            return {"signals": {}, "heartbeat_date": ""}, None
+            return {"signals": {}}
 
         response.raise_for_status()
         result = response.json()
 
-        content = base64.b64decode(result["content"]).decode("utf-8")
-        return json.loads(content), result["sha"]
+        content = base64.b64decode(
+            result["content"]
+        ).decode("utf-8")
+
+        return json.loads(content)
 
     except Exception:
-        logging.exception("V3 state yuklashda xato")
-        return {"signals": {}, "heartbeat_date": ""}, None
-
-
-def save_state(state, sha):
-    url, headers = github_file_request()
-
-    content = base64.b64encode(
-        json.dumps(
-            state,
-            ensure_ascii=False,
-            indent=2
-        ).encode("utf-8")
-    ).decode("utf-8")
-
-    payload = {
-        "message": "Update forex V3 state",
-        "content": content,
-        "branch": GITHUB_BRANCH,
-    }
-
-    if sha:
-        payload["sha"] = sha
-
-    response = session.put(
-        url,
-        headers=headers,
-        json=payload,
-        timeout=20,
-    )
-
-    response.raise_for_status()
-
-
-# =============== USERS ===============
-
-def get_approved_users():
-    response = session.get(
-        f"{WORKER_URL}/approved-users",
-        headers={"X-Worker-Secret": WEBHOOK_SECRET},
-        timeout=20,
-    )
-
-    response.raise_for_status()
-
-    users = response.json().get("users", [])
-
-    return list(
-        set([str(ADMIN_ID)] + [str(x) for x in users])
-    )
+        logging.exception("State yuklashda xato")
+        return {"signals": {}}
 
 
 # =============== MARKET DATA ===============
@@ -215,12 +152,16 @@ def get_candles(symbol, interval):
 
     if len(candles) < 60:
         raise ValueError(
-            f"{symbol} {interval}: indikatorlar uchun "
-            f"shamlar yetarli emas ({len(candles)})"
+            f"{symbol} {interval}: shamlar yetarli emas: "
+            f"{len(candles)}"
         )
 
     candle_cache[cache_key] = candles
-    logging.info(f"Candles: {symbol} {interval} = {len(candles)}")
+
+    logging.info(
+        f"Candles: {symbol} {interval} = {len(candles)}"
+    )
+
     return candles
 
 
@@ -267,8 +208,11 @@ def calculate_rsi(values, period=14):
     avg_loss = sum(losses[:period]) / period
 
     def rsi_value(gain, loss):
+        if gain == 0 and loss == 0:
+            return 50.0
         if loss == 0:
             return 100.0
+
         rs = gain / loss
         return 100 - (100 / (1 + rs))
 
@@ -332,8 +276,13 @@ def calculate_adx(candles, period=14):
     minus_dm = [0.0] * size
 
     for i in range(1, size):
-        high_move = candles[i]["high"] - candles[i - 1]["high"]
-        low_move = candles[i - 1]["low"] - candles[i]["low"]
+        high_move = (
+            candles[i]["high"] - candles[i - 1]["high"]
+        )
+
+        low_move = (
+            candles[i - 1]["low"] - candles[i]["low"]
+        )
 
         plus_dm[i] = (
             high_move
@@ -349,8 +298,14 @@ def calculate_adx(candles, period=14):
 
         tr[i] = max(
             candles[i]["high"] - candles[i]["low"],
-            abs(candles[i]["high"] - candles[i - 1]["close"]),
-            abs(candles[i]["low"] - candles[i - 1]["close"]),
+            abs(
+                candles[i]["high"]
+                - candles[i - 1]["close"]
+            ),
+            abs(
+                candles[i]["low"]
+                - candles[i - 1]["close"]
+            ),
         )
 
     result = [None] * size
@@ -366,12 +321,20 @@ def calculate_adx(candles, period=14):
 
     for i in range(period, size):
         if i > period:
-            smooth_tr = smooth_tr - smooth_tr / period + tr[i]
-            smooth_plus = (
-                smooth_plus - smooth_plus / period + plus_dm[i]
+            smooth_tr = (
+                smooth_tr - smooth_tr / period + tr[i]
             )
+
+            smooth_plus = (
+                smooth_plus
+                - smooth_plus / period
+                + plus_dm[i]
+            )
+
             smooth_minus = (
-                smooth_minus - smooth_minus / period + minus_dm[i]
+                smooth_minus
+                - smooth_minus / period
+                + minus_dm[i]
             )
 
         if smooth_tr <= 0:
@@ -463,19 +426,21 @@ def calculate_supertrend(candles):
 
         if direction[i - 1] == -1:
             direction[i] = (
-                1 if candles[i]["close"] > upper[i]
+                1
+                if candles[i]["close"] > upper[i]
                 else -1
             )
         else:
             direction[i] = (
-                -1 if candles[i]["close"] < lower[i]
+                -1
+                if candles[i]["close"] < lower[i]
                 else 1
             )
 
     return direction, atr
 
 
-# =============== INDICATOR SNAPSHOT ===============
+# =============== SNAPSHOT ===============
 
 def get_snapshot(symbol, timeframe, interval):
     candles = get_candles(symbol, interval)
@@ -499,72 +464,96 @@ def get_snapshot(symbol, timeframe, interval):
     }
 
 
-# =============== SIGNAL SCORE ===============
-
+# =============== SCORE ===============
 
 def calculate_score(side, snapshot, h1, h4, index=-1):
     candles = snapshot["candles"]
 
-    i = index
-    price = candles[i]["close"]
+    price = candles[index]["close"]
 
-    ema50 = snapshot["ema50"][i]
-    ema200 = snapshot["ema200"][i]
-    rsi = snapshot["rsi"][i]
-    adx = snapshot["adx"][i]
-    direction = snapshot["direction"][i]
+    ema50 = snapshot["ema50"][index]
+    ema200 = snapshot["ema200"][index]
+    rsi = snapshot["rsi"][index]
+    adx = snapshot["adx"][index]
+    direction = snapshot["direction"][index]
 
-    if any(x is None for x in [ema50, rsi, adx, direction]):
+    if any(x is None for x in [
+        ema50, rsi, adx, direction
+    ]):
         return 0
-
-    score = 0
 
     expected = 1 if side == "BUY" else -1
 
-    # Supertrend
+    score = 0
+    possible = 0
+
+    # Supertrend: 20 ball
+    possible += 20
     if direction == expected:
         score += 20
 
-    # EMA50
-    if (side == "BUY" and price > ema50) or (
+    # EMA50: 15 ball
+    possible += 15
+    if (
+        side == "BUY" and price > ema50
+    ) or (
         side == "SELL" and price < ema50
     ):
-        score += 10
+        score += 15
 
-    # EMA200 mavjud bo'lsa
+    # EMA200: faqat mavjud bo'lsa
     if ema200 is not None:
-        if (side == "BUY" and ema50 > ema200) or (
+        possible += 15
+
+        if (
+            side == "BUY" and ema50 > ema200
+        ) or (
             side == "SELL" and ema50 < ema200
         ):
-            score += 20
+            score += 15
 
-    # RSI
-    if (side == "BUY" and 50 < rsi < 75) or (
+    # RSI: 10 ball
+    possible += 10
+
+    if (
+        side == "BUY" and 50 < rsi < 75
+    ) or (
         side == "SELL" and 25 < rsi < 50
     ):
         score += 10
 
-    # ADX
+    # ADX: 10 ball
+    possible += 10
+
     if adx >= 15:
-        score += 15
+        score += 10
 
     # H1 va H4 tasdig'i
     for higher in (h1, h4):
         hi_direction = higher["direction"][-1]
         hi_ema50 = higher["ema50"][-1]
-        hi_ema200 = higher["ema200"][-1]
+        hi_price = higher["candles"][-1]["close"]
 
-        if hi_direction == expected:
-            score += 5
+        if hi_direction is not None:
+            possible += 10
 
-        if hi_ema50 is not None and hi_ema200 is not None:
-            if (side == "BUY" and hi_ema50 > hi_ema200) or (
-                side == "SELL" and hi_ema50 < hi_ema200
+            if hi_direction == expected:
+                score += 10
+
+        if hi_ema50 is not None:
+            possible += 5
+
+            if (
+                side == "BUY" and hi_price > hi_ema50
+            ) or (
+                side == "SELL" and hi_price < hi_ema50
             ):
                 score += 5
 
-    return score
+    if possible == 0:
+        return 0
 
+    return round(score / possible * 100)
 
 
 # =============== BUILD SIGNAL ===============
@@ -578,14 +567,14 @@ def build_signal(symbol, timeframe, interval, h1, h4):
     previous_direction = snapshot["direction"][-2]
 
     if current_direction is None or previous_direction is None:
-        return None
+        return None, "Supertrend hali hisoblanmagan"
 
     side = "BUY" if current_direction == 1 else "SELL"
 
     score = calculate_score(side, snapshot, h1, h4)
 
     if score < MIN_SCORE:
-        return None
+        return None, f"Ball yetarli emas: {score}/100"
 
     current = candles[-1]
     previous = candles[-2]
@@ -596,42 +585,87 @@ def build_signal(symbol, timeframe, interval, h1, h4):
     rsi_now = snapshot["rsi"][-1]
     rsi_previous = snapshot["rsi"][-2]
 
+    atr = snapshot["atr"][-1]
+
     if any(x is None for x in [
-        ema_now, ema_previous, rsi_now, rsi_previous
+        ema_now, ema_previous,
+        rsi_now, rsi_previous, atr
     ]):
-        return None
+        return None, "Indikator qiymatlari yetarli emas"
 
-    trend_flip = current_direction != previous_direction
+    if atr <= 0:
+        return None, "ATR noto'g'ri"
 
+    # 1. Supertrend yo'nalishi almashishi
+    trend_flip = (
+        current_direction != previous_direction
+    )
+
+    # 2. EMA50 ga qaytish
     if side == "BUY":
         pullback = (
             previous["low"] <= ema_previous
             and current["close"] > ema_now
         )
-
-        rsi_cross = (
-            rsi_previous <= 50 and rsi_now > 50
-        )
-
     else:
         pullback = (
             previous["high"] >= ema_previous
             and current["close"] < ema_now
         )
 
+    # 3. RSI 50 chizig'ini kesishi
+    if side == "BUY":
+        rsi_cross = (
+            rsi_previous <= 50 and rsi_now > 50
+        )
+    else:
         rsi_cross = (
             rsi_previous >= 50 and rsi_now < 50
         )
 
-    if not (trend_flip or pullback or rsi_cross):
-        return None
+    # 4. RSI qaytish signali
+    if side == "BUY":
+        rsi_recovery = (
+            rsi_previous <= 45 and rsi_now > 45
+        )
+    else:
+        rsi_recovery = (
+            rsi_previous >= 55 and rsi_now < 55
+        )
+
+    # 5. Oldingi sham maksimum/minimumidan o'tish
+    if side == "BUY":
+        breakout = (
+            current["close"] > previous["high"]
+            and 52 < rsi_now < 75
+        )
+    else:
+        breakout = (
+            current["close"] < previous["low"]
+            and 25 < rsi_now < 48
+        )
+
+    setups = []
+
+    if trend_flip:
+        setups.append("Trend almashishi")
+
+    if pullback:
+        setups.append("EMA50 pullback")
+
+    if rsi_cross:
+        setups.append("RSI 50 kesish")
+
+    if rsi_recovery:
+        setups.append("RSI qaytishi")
+
+    if breakout:
+        setups.append("Momentum breakout")
+
+    if not setups:
+        return None, "Signal setup shartlari bajarilmadi"
 
     entry = current["close"]
-    atr = snapshot["atr"][-1]
-
-    if atr is None or atr <= 0:
-        return None
-
     risk = atr * SL_ATR_MULTIPLIER
 
     if side == "BUY":
@@ -657,8 +691,9 @@ def build_signal(symbol, timeframe, interval, h1, h4):
         "score": score,
         "rsi": rsi_now,
         "adx": snapshot["adx"][-1],
+        "setups": setups,
         "candle_time": current["time"],
-    }
+    }, "Signal tayyor"
 
 
 # =============== MESSAGE ===============
@@ -689,9 +724,10 @@ def format_signal(signal):
         f"✅ TP2: <code>{format_price(symbol, signal['tp2'])}</code>\n"
         f"✅ TP3: <code>{format_price(symbol, signal['tp3'])}</code>\n"
         f"━━━━━━━━━━━━━━\n"
-        f"📊 Kuch bahosi: <b>{signal['score']}/90 — {strength}</b>\n"
+        f"📊 Moslik bahosi: <b>{signal['score']}/100 — {strength}</b>\n"
         f"RSI: {signal['rsi']:.1f} | ADX: {signal['adx']:.1f}\n"
-        f"Strategiya: Supertrend + EMA50/200 + RSI + ADX\n"
+        f"Setup: {', '.join(signal['setups'])}\n"
+        f"Strategiya: Supertrend + EMA + RSI + ADX\n"
         f"🕯 Yopilgan sham asosida\n"
         f"⚠️ Avval demo hisobda tekshiring."
     )
@@ -700,30 +736,30 @@ def format_signal(signal):
 # =============== MAIN ===============
 
 def main():
-    state, sha = load_state()
-
+    state = load_state()
     state.setdefault("signals", {})
-    state.setdefault("heartbeat_date", "")
-
-    users = []
 
     sent_count = 0
+    signal_count = 0
     errors = []
 
     for symbol in SYMBOLS:
         try:
             h1 = get_snapshot(symbol, "H1", "1h")
             h4 = get_snapshot(symbol, "H4", "4h")
+
         except Exception as error:
             logging.exception(f"{symbol} H1/H4 xatosi")
-            errors.append(f"{symbol} H1/H4: {str(error)[:120]}")
+            errors.append(
+                f"{symbol} H1/H4: {str(error)[:120]}"
+            )
             continue
 
         for timeframe, interval in TIMEFRAMES.items():
             key = f"{symbol}_{timeframe}"
 
             try:
-                signal = build_signal(
+                signal, reason = build_signal(
                     symbol,
                     timeframe,
                     interval,
@@ -732,7 +768,7 @@ def main():
                 )
 
                 if signal is None:
-                    print(f"INFO | {key} | Yangi signal yo'q")
+                    print(f"INFO | {key} | {reason}")
                     continue
 
                 signature = (
@@ -743,65 +779,41 @@ def main():
                     print(f"SKIP | {key} | Takroriy signal")
                     continue
 
-                message = format_signal(signal)
-                delivered = False
+                signal_count += 1
 
-                for user_id in users:
-                    try:
-                        telegram_send(user_id, message)
-                        delivered = True
-                    except Exception:
-                        logging.exception(
-                            f"Telegram yuborishda xato: {user_id}"
-                        )
+                print(
+                    f"\nSIGNAL | {key} | {signal['side']} "
+                    f"| Score: {signal['score']}/100"
+                )
 
-                if delivered:
-                    state["signals"][key] = signature
-                    sent_count += 1
+                print(format_signal(signal))
 
+                if not TEST_MODE:
                     print(
-                        f"SENT | {key} | {signal['side']} | "
-                        f"Score: {signal['score']}"
+                        "XAVFSIZLIK: Jonli yuborish rejimi "
+                        "hali alohida sozlanishi kerak."
                     )
-                else:
-                    print(f"ERROR | {key} | Xabar yetkazilmadi")
 
             except Exception as error:
                 logging.exception(f"{key} xatosi")
-                errors.append(f"{key}: {str(error)[:120]}")
+                errors.append(
+                    f"{key}: {str(error)[:120]}"
+                )
                 print(f"ERROR | {key} | {error}")
 
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
-    if False and state["heartbeat_date"] != today:
-        try:
-            telegram_send(
-                ADMIN_ID,
-                "🤖 <b>Forex Signals Bot V3 faol</b>\n"
-                "EURUSD va XAUUSD tekshirilmoqda.\n"
-                "M5 / M15 / M30 / H1 / H4"
-            )
-            state["heartbeat_date"] = today
-        except Exception:
-            logging.exception("Heartbeat yuborishda xato")
-
-    print("V3 TEST MODE: Telegram va state saqlash o‘chirildi")
-
-    print("\n========== V3 NATIJA ==========")
-    print(f"Yangi signallar: {sent_count}")
+    print("\n========== V3 TEST NATIJA ==========")
+    print(f"Topilgan signallar: {signal_count}")
+    print(f"Yuborilgan signallar: {sent_count}")
     print(f"Xatolar: {len(errors)}")
+    print("TEST MODE:", TEST_MODE)
+    print("Telegram xabarlari yuborilmadi.")
+    print("State fayliga o'zgarish yozilmadi.")
 
     if errors:
-        try:
-            telegram_send(
-                ADMIN_ID,
-                "⚠️ <b>V3 xatolari:</b>\n"
-                + "\n".join(errors[:10])
-            )
-        except Exception:
-            logging.exception("Xatolar haqida xabar yuborilmadi")
+        print("\nXATOLAR:")
+        for error in errors:
+            print("-", error)
 
 
 if __name__ == "__main__":
     main()
-
