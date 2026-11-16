@@ -234,7 +234,7 @@ def main():
             if not result:
                 print(f"{symbol}: yetarli sham ma'lumoti yo'q.")
                 continue
-                            errors = state.setdefault("_errors", {})
+            errors = state.setdefault("_errors", {})
             if errors.get(symbol):
                 send_message(f"🟢 {symbol} qayta ishlayapti!")
                 errors.pop(symbol, None)
