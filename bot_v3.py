@@ -701,7 +701,7 @@ def main():
     state.setdefault("signals", {})
     state.setdefault("heartbeat_date", "")
 
-    users = get_approved_users()
+    users = []
 
     sent_count = 0
     errors = []
@@ -769,7 +769,7 @@ def main():
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-    if state["heartbeat_date"] != today:
+    if False and state["heartbeat_date"] != today:
         try:
             telegram_send(
                 ADMIN_ID,
@@ -781,7 +781,7 @@ def main():
         except Exception:
             logging.exception("Heartbeat yuborishda xato")
 
-    save_state(state, sha)
+    print("V3 TEST MODE: Telegram va state saqlash o‘chirildi")
 
     print("\n========== V3 NATIJA ==========")
     print(f"Yangi signallar: {sent_count}")
