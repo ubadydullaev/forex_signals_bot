@@ -1,7 +1,9 @@
 {
-  "pending": [],
+  "pending": [
+    8678763398
+  ],
   "users": [],
-  "update_offset": 656856378,
+  "update_offset": 656856379,
   "last_signals": {},
   "heartbeat_date": "2026-11-16"
 }
