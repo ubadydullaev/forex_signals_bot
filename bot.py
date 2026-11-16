@@ -127,7 +127,7 @@ def get_candles(url):
         if not isinstance(item, dict):
             continue
 
-        if item.get("isOpen") is not True:
+        if item.get("isOpen") is True:
             continue
 
         try:
