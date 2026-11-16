@@ -404,6 +404,7 @@ def format_signal(signal):
 
 # ================= MAIN =================
 
+
 def main():
     state, sha = load_state()
     state.setdefault("signals", {})
@@ -413,14 +414,27 @@ def main():
     sent_count = 0
     errors = []
 
+    print("\n========== TIMEFRAME DIAGNOSTIKA ==========")
+
     for symbol in SYMBOLS:
         for timeframe, interval in TIMEFRAMES.items():
             key = f"{symbol}_{timeframe}"
 
             try:
+                candles = get_candles(symbol, interval)
+                directions, atr_values = calculate_supertrend(candles)
+
+                print(
+                    f"OK | {key} | "
+                    f"Interval: {interval} | "
+                    f"Yopilgan shamlar: {len(candles)} | "
+                    f"Oxirgi sham: {candles[-1]['time']}"
+                )
+
                 signal = build_signal(symbol, timeframe, interval)
 
                 if signal is None:
+                    print(f"INFO | {key} | Hozir yangi signal yo'q")
                     continue
 
                 signature = (
@@ -428,6 +442,7 @@ def main():
                 )
 
                 if state["signals"].get(key) == signature:
+                    print(f"SKIP | {key} | Takroriy signal")
                     continue
 
                 message = format_signal(signal)
@@ -442,10 +457,12 @@ def main():
 
                 state["signals"][key] = signature
                 sent_count += 1
+                print(f"SENT | {key} | {signal['side']}")
 
             except Exception as error:
                 logging.exception(f"{key} xatosi")
-                errors.append(f"{key}: {str(error)[:120]}")
+                errors.append(f"{key}: {str(error)[:150]}")
+                print(f"ERROR | {key} | {error}")
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -454,25 +471,24 @@ def main():
             ADMIN_ID,
             "🤖 <b>Forex Signals Bot V2 faol</b>\n"
             "📊 EURUSD va XAUUSD tekshirilmoqda.\n"
-            "⏱ M5 / M15 / M30 / H1 / H4\n"
-            "🕒 Kunlik UTC hisoboti."
+            "⏱ M5 / M15 / M30 / H1 / H4"
         )
         state["heartbeat_date"] = today
 
     save_state(state, sha)
 
-    logging.info(
-        f"Tugadi. Yangi signallar: {sent_count}. "
-        f"Xatolar: {len(errors)}"
-    )
+    print("\n========== YAKUNIY NATIJA ==========")
+    print(f"Yangi signallar: {sent_count}")
+    print(f"Timeframe xatolari: {len(errors)}")
 
     if errors:
         telegram_send(
             ADMIN_ID,
-            "⚠️ <b>Botdagi ayrim timeframe xatolari:</b>\n"
+            "⚠️ <b>Timeframe xatolari:</b>\n"
             + "\n".join(errors[:10])
         )
 
 
 if __name__ == "__main__":
     main()
+
