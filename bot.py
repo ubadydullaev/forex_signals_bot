@@ -117,7 +117,7 @@ def get_candles(url):
     print("API JAVOBI:", str(data)[:3000])
 
     if isinstance(data, dict):
-        data = data.get("data", data.get("candles", data.get("result", [])))
+        data = data.get("bars", data.get("data", data.get("candles", data.get("result", []))))
     if not isinstance(data, list):
         raise ValueError("OHLC ma'lumotlari ro'yxat emas")
 
