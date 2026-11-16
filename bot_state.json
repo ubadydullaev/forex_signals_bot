@@ -6,5 +6,7 @@
   "update_offset": 656856379,
   "last_signals": {},
   "heartbeat_date": "2026-11-16",
-  "signals": {}
+  "signals": {
+    "EURUSD_M15": "2026-11-16T06:30:00Z_SELL"
+  }
 }
