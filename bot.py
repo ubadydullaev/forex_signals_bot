@@ -132,7 +132,7 @@ def get_candles(url):
 
         try:
             candle = {
-                "time": str(item.get("timestamp", item.get("time", ""))),
+                "time": str(item.get("openTime", item.get("timestamp", item.get("time", "")))),
                 "open": float(item.get("open", item.get("o"))),
                 "high": float(item.get("high", item.get("h"))),
                 "low": float(item.get("low", item.get("l"))),
