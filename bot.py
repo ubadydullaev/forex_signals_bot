@@ -9,7 +9,7 @@ CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 
 SYMBOLS = {
     "EURUSD": "EURUSD=X",
-    "XAUUSD": "XAUUSD=X",
+    "XAUUSD": "GC=F",
 }
 INTERVAL_SECONDS = 30 * 60
 ATR_PERIOD = 14
