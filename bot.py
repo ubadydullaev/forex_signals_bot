@@ -115,7 +115,7 @@ def get_candles(url):
     response = session.get(url, timeout=25)
     response.raise_for_status()
     data = response.json()
-
+print("API JAVOBI:", str(data)[:3000])
     if isinstance(data, dict):
         data = data.get("data", data.get("candles", data.get("result", [])))
 
