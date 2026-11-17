@@ -360,38 +360,82 @@ def trend_direction(candles):
     return 0
 
 
+
 def structure_data(candles):
+    if len(candles) < 21:
+        return {
+            "buy": 0,
+            "sell": 0,
+            "swing_low": None,
+            "swing_high": None
+        }
+
     recent = candles[-21:-1]
-    c = candles[-1]
-    if len(recent) < 15:
-        return {"buy": 0, "sell": 0, "swing_low": None, "swing_high": None}
-    high = max(x["high"] for x in recent)
-    low = min(x["low"] for x in recent)
-    body = c["close"] - c["open"]
+    current = candles[-1]
+    middle = candles[-2]
+    first = candles[-3]
+
+    swing_high = max(x["high"] for x in recent)
+    swing_low = min(x["low"] for x in recent)
 
     buy = 0
     sell = 0
-    if c["low"] < low and c["close"] > low:
+
+    candle_range = current["high"] - current["low"]
+
+    # 1. Liquidity sweep
+    bullish_sweep = (
+        current["low"] < swing_low
+        and current["close"] > swing_low
+    )
+
+    bearish_sweep = (
+        current["high"] > swing_high
+        and current["close"] < swing_high
+    )
+
+    if bullish_sweep:
         buy += 1
-    if c["high"] > high and c["close"] < high:
+
+    if bearish_sweep:
         sell += 1
-    if c["close"] > high:
-        buy += 2
-    if c["close"] < low:
-        sell += 2
-    if len(candles) >= 3:
-        if c["low"] > candles[-3]["high"]:
+
+    # 2. Bullish va bearish FVG
+    bullish_fvg = (
+        current["low"] > first["high"]
+        and middle["close"] > middle["open"]
+    )
+
+    bearish_fvg = (
+        current["high"] < first["low"]
+        and middle["close"] < middle["open"]
+    )
+
+    if bullish_fvg:
+        buy += 1
+
+    if bearish_fvg:
+        sell += 1
+
+    # 3. Kuchli yopilish shamini tekshirish
+    if candle_range > 0:
+        close_position = (
+            current["close"] - current["low"]
+        ) / candle_range
+
+        if current["close"] > current["open"] and close_position >= 0.75:
             buy += 1
-        if c["high"] < candles[-3]["low"]:
+
+        elif current["close"] < current["open"] and close_position <= 0.25:
             sell += 1
-    if body > 0:
-        buy += 1
-    elif body < 0:
-        sell += 1
+
     return {
-        "buy": buy, "sell": sell,
-        "swing_low": low, "swing_high": high
+        "buy": buy,
+        "sell": sell,
+        "swing_low": swing_low,
+        "swing_high": swing_high
     }
+
 
 
 def price_digits(symbol):
