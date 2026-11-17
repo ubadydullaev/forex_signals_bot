@@ -103,7 +103,15 @@ def get_candles(symbol, interval):
 
     if not isinstance(bars, list):
         raise ValueError("API candle ro'yxatini qaytarmadi")
-
+    logging.info(
+        "BIQUOTE DEBUG | %s %s | URL: %s | COUNT: %s | FIRST: %s | LAST: %s",
+        symbol,
+        interval,
+        response.url,
+        len(bars),
+        bars[0] if bars else None,
+        bars[-1] if bars else None
+            )
     result = []
     seen = set()
 
