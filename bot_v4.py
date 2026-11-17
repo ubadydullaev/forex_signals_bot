@@ -41,7 +41,7 @@ SL_ATR_MIN = 1.2
 SL_ATR_MAX = 2.2
 TP_R_MULTIPLES = (1.5, 2.5, 3.5)
 REFERENCE_LOT = 0.01
-CANDLE_LIMIT = 300
+CANDLE_LIMIT = 1000
 
 logging.basicConfig(
     level=logging.INFO,
