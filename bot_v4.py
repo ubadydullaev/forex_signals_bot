@@ -63,7 +63,117 @@ def time_key(value):
             return (1, dt.timestamp())
         except ValueError:
             return (2, value)
+def get_candles(symbol, interval):
+    timeframe_map = {
+        "15m": ("m15", 7, 15 * 60 * 1000),
+        "30m": ("m30", 10, 30 * 60 * 1000),
+        "1h": ("h1", 20, 60 * 60 * 1000),
+        "4h": ("h4", 75, 4 * 60 * 60 * 1000),
+    }
 
+    if interval not in timeframe_map:
+        raise ValueError(f"Noto'g'ri timeframe: {interval}")
+
+    dukascopy_tf, lookback_days, candle_ms = timeframe_map[interval]
+
+    now = datetime.now(timezone.utc)
+    from_date = (now - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+    to_date = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    output_dir = os.path.abspath("download")
+    os.makedirs(output_dir, exist_ok=True)
+
+    file_name = (
+        f"{symbol.lower()}_{dukascopy_tf}_"
+        f"{now.strftime('%Y%m%d%H%M')}"
+    )
+
+    output_file = os.path.join(output_dir, file_name + ".json")
+
+    command = [
+        "npx", "--no-install", "dukascopy-node",
+        "-i", symbol.lower(),
+        "-from", from_date,
+        "-to", to_date,
+        "-t", dukascopy_tf,
+        "-f", "json",
+        "-dir", output_dir,
+        "-fn", file_name,
+        "--cache",
+        "--retries", "3",
+        "--retry-on-empty",
+    ]
+
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=240
+    )
+
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Dukascopy xatosi: {result.stderr[-1500:]}"
+        )
+
+    if not os.path.exists(output_file):
+        raise RuntimeError("Dukascopy JSON fayl yaratilmadi")
+
+    with open(output_file, "r", encoding="utf-8") as f:
+        raw_data = json.load(f)
+
+    if not isinstance(raw_data, list):
+        raise RuntimeError("Dukascopy noto'g'ri JSON format qaytardi")
+
+    now_ms = int(now.timestamp() * 1000)
+    candles = []
+
+    for item in raw_data:
+        try:
+            timestamp = int(item["timestamp"])
+
+            # Faqat to'liq yopilgan shamlar
+            if timestamp + candle_ms > now_ms:
+                continue
+
+            candle = {
+                "time": datetime.fromtimestamp(
+                    timestamp / 1000,
+                    timezone.utc
+                ).isoformat(),
+                "open": float(item["open"]),
+                "high": float(item["high"]),
+                "low": float(item["low"]),
+                "close": float(item["close"]),
+            }
+
+            if not all(
+                value > 0
+                for value in (
+                    candle["open"],
+                    candle["high"],
+                    candle["low"],
+                    candle["close"]
+                )
+            ):
+                continue
+
+            if candle["high"] < candle["low"]:
+                continue
+
+            candles.append(candle)
+
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+
+    candles.sort(key=lambda x: time_key(x["time"]))
+
+    if len(candles) < 220:
+        raise RuntimeError(
+            f"Yetarli yopilgan sham yo'q: {len(candles)}/220"
+        )
+
+    return candles[-1000:]
 
 
 
