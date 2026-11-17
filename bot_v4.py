@@ -250,28 +250,68 @@ def atr_series(candles, period=14):
     return out
 
 
+
 def adx_value(candles, period=14):
-    if len(candles) < period * 2 + 2:
+    if len(candles) < period * 2 + 1:
         return None
+
     tr = true_ranges(candles)
-    plus_dm, minus_dm = [0.0], [0.0]
+    plus_dm = [0.0] * len(candles)
+    minus_dm = [0.0] * len(candles)
+
     for i in range(1, len(candles)):
         up = candles[i]["high"] - candles[i - 1]["high"]
         down = candles[i - 1]["low"] - candles[i]["low"]
-        plus_dm.append(up if up > down and up > 0 else 0.0)
-        minus_dm.append(down if down > up and down > 0 else 0.0)
 
-    dx = []
+        if up > down and up > 0:
+            plus_dm[i] = up
+        elif down > up and down > 0:
+            minus_dm[i] = down
+
+    smoothed_tr = sum(tr[1:period + 1])
+    smoothed_plus = sum(plus_dm[1:period + 1])
+    smoothed_minus = sum(minus_dm[1:period + 1])
+
+    dx_values = []
+
     for i in range(period, len(candles)):
-        tr_sum = sum(tr[i - period + 1:i + 1])
-        if tr_sum <= 0:
+        if i > period:
+            smoothed_tr = (
+                smoothed_tr - smoothed_tr / period + tr[i]
+            )
+            smoothed_plus = (
+                smoothed_plus - smoothed_plus / period + plus_dm[i]
+            )
+            smoothed_minus = (
+                smoothed_minus - smoothed_minus / period + minus_dm[i]
+            )
+
+        if smoothed_tr <= 0:
+            dx_values.append(0.0)
             continue
-        p = sum(plus_dm[i - period + 1:i + 1]) / tr_sum * 100
-        m = sum(minus_dm[i - period + 1:i + 1]) / tr_sum * 100
-        dx.append(abs(p - m) / (p + m) * 100 if p + m else 0)
-    if len(dx) < period:
+
+        plus_di = 100 * smoothed_plus / smoothed_tr
+        minus_di = 100 * smoothed_minus / smoothed_tr
+
+        denominator = plus_di + minus_di
+
+        dx = (
+            100 * abs(plus_di - minus_di) / denominator
+            if denominator > 0 else 0.0
+        )
+
+        dx_values.append(dx)
+
+    if len(dx_values) < period:
         return None
-    return sum(dx[-period:]) / period
+
+    adx = sum(dx_values[:period]) / period
+
+    for dx in dx_values[period:]:
+        adx = (adx * (period - 1) + dx) / period
+
+    return adx
+
 
 
 def supertrend_direction(candles, atrs, factor=2.5):
