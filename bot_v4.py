@@ -111,9 +111,13 @@ def get_candles(symbol, interval):
         timeout=240
     )
 
-    if result.returncode != 0:
+        if result.returncode != 0:
+        diagnostic = "\n".join(
+            x for x in (result.stdout, result.stderr)
+            if x and x.strip()
+        )
         raise RuntimeError(
-            f"Dukascopy xatosi: {result.stderr[-1500:]}"
+            f"Dukascopy xatosi: {diagnostic[-2500:] or 'CLI hech qanday xabar bermadi'}"
         )
 
     if not os.path.exists(output_file):
