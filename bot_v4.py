@@ -111,7 +111,7 @@ def get_candles(symbol, interval):
         timeout=240
     )
 
-        if result.returncode != 0:
+    if result.returncode != 0:
         diagnostic = "\n".join(
             x for x in (result.stdout, result.stderr)
             if x and x.strip()
