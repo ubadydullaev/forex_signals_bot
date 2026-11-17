@@ -34,7 +34,7 @@ SYMBOLS = [
     "USDJPY",
     "AUDUSD",
     "USDCAD",
-    "USDCHF"
+    "USDCHF",
 ]
 
 TIMEFRAMES = {
@@ -59,6 +59,10 @@ CANDLE_LIMIT = 1000
 
 MAX_TP_LEVELS = 20
 
+SUPPORT_CLUSTER_ATR = 0.20
+FVG_MIN_ATR = 0.10
+FVG_IMPULSE_ATR = 0.50
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s"
@@ -67,7 +71,7 @@ logging.basicConfig(
 session = requests.Session()
 
 session.headers.update({
-    "User-Agent": "ForexSignalsBot/4.2"
+    "User-Agent": "ForexSignalsBot/4.3"
 })
 
 
@@ -76,12 +80,14 @@ session.headers.update({
 # =========================================================
 
 def time_key(value):
+
     value = str(value)
 
     try:
         return (0, float(value))
 
     except ValueError:
+
         try:
             dt = datetime.fromisoformat(
                 value.replace("Z", "+00:00")
@@ -205,7 +211,7 @@ def get_candles(symbol, interval):
 
     now_ms = int(now.timestamp() * 1000)
 
-    candles = []
+    candles_by_time = {}
 
     for item in raw_data:
 
@@ -223,6 +229,8 @@ def get_candles(symbol, interval):
                     timezone.utc
                 ).isoformat(),
 
+                "timestamp": timestamp,
+
                 "open": float(item["open"]),
                 "high": float(item["high"]),
                 "low": float(item["low"]),
@@ -236,7 +244,10 @@ def get_candles(symbol, interval):
                 candle["close"]
             )
 
-            if not all(x > 0 for x in prices):
+            if not all(
+                x > 0 and x < float("inf")
+                for x in prices
+            ):
                 continue
 
             if candle["high"] < candle["low"]:
@@ -256,7 +267,7 @@ def get_candles(symbol, interval):
             ):
                 continue
 
-            candles.append(candle)
+            candles_by_time[timestamp] = candle
 
         except (
             KeyError,
@@ -266,8 +277,9 @@ def get_candles(symbol, interval):
         ):
             continue
 
-    candles.sort(
-        key=lambda x: time_key(x["time"])
+    candles = sorted(
+        candles_by_time.values(),
+        key=lambda x: x["timestamp"]
     )
 
     if len(candles) < 220:
@@ -320,21 +332,38 @@ def rsi_series(values, period=14):
         for i in range(1, len(values))
     ]
 
-    gains = [max(x, 0) for x in changes]
+    gains = [
+        max(x, 0)
+        for x in changes
+    ]
 
-    losses = [max(-x, 0) for x in changes]
+    losses = [
+        max(-x, 0)
+        for x in changes
+    ]
 
     avg_g = sum(gains[:period]) / period
     avg_l = sum(losses[:period]) / period
 
     def calculate(g, l):
 
+        if l == 0 and g == 0:
+            return 50.0
+
         if l == 0:
             return 100.0
 
-        return 100 - 100 / (1 + g / l)
+        if g == 0:
+            return 0.0
 
-    out[period] = calculate(avg_g, avg_l)
+        rs = g / l
+
+        return 100 - 100 / (1 + rs)
+
+    out[period] = calculate(
+        avg_g,
+        avg_l
+    )
 
     for i in range(period + 1, len(values)):
 
@@ -348,7 +377,10 @@ def rsi_series(values, period=14):
             + losses[i - 1]
         ) / period
 
-        out[i] = calculate(avg_g, avg_l)
+        out[i] = calculate(
+            avg_g,
+            avg_l
+        )
 
     return out
 
@@ -367,13 +399,21 @@ def true_ranges(candles):
 
         else:
 
-            previous_close = candles[i - 1]["close"]
+            previous_close = (
+                candles[i - 1]["close"]
+            )
 
             result.append(
                 max(
                     candle["high"] - candle["low"],
-                    abs(candle["high"] - previous_close),
-                    abs(candle["low"] - previous_close)
+                    abs(
+                        candle["high"]
+                        - previous_close
+                    ),
+                    abs(
+                        candle["low"]
+                        - previous_close
+                    )
                 )
             )
 
@@ -396,7 +436,8 @@ def atr_series(candles, period=14):
     for i in range(period, len(tr)):
 
         value = (
-            value * (period - 1) + tr[i]
+            value * (period - 1)
+            + tr[i]
         ) / period
 
         out[i] = value
@@ -404,10 +445,14 @@ def atr_series(candles, period=14):
     return out
 
 
-def adx_value(candles, period=14):
+# =========================================================
+# ADX + DIRECTIONAL INDICATORS
+# =========================================================
+
+def adx_data(candles, period=14):
 
     if len(candles) < period * 2 + 1:
-        return None
+        return None, None, None
 
     tr = true_ranges(candles)
 
@@ -432,7 +477,9 @@ def adx_value(candles, period=14):
         elif down > up and down > 0:
             minus_dm[i] = down
 
-    smoothed_tr = sum(tr[1:period + 1])
+    smoothed_tr = sum(
+        tr[1:period + 1]
+    )
 
     smoothed_plus = sum(
         plus_dm[1:period + 1]
@@ -443,6 +490,9 @@ def adx_value(candles, period=14):
     )
 
     dx_values = []
+
+    last_plus_di = None
+    last_minus_di = None
 
     for i in range(period, len(candles)):
 
@@ -467,7 +517,12 @@ def adx_value(candles, period=14):
             )
 
         if smoothed_tr <= 0:
+
             dx_values.append(0.0)
+
+            last_plus_di = 0.0
+            last_minus_di = 0.0
+
             continue
 
         plus_di = (
@@ -477,6 +532,9 @@ def adx_value(candles, period=14):
         minus_di = (
             100 * smoothed_minus / smoothed_tr
         )
+
+        last_plus_di = plus_di
+        last_minus_di = minus_di
 
         denominator = plus_di + minus_di
 
@@ -494,9 +552,11 @@ def adx_value(candles, period=14):
         dx_values.append(dx)
 
     if len(dx_values) < period:
-        return None
+        return None, None, None
 
-    adx = sum(dx_values[:period]) / period
+    adx = sum(
+        dx_values[:period]
+    ) / period
 
     for dx in dx_values[period:]:
 
@@ -504,8 +564,26 @@ def adx_value(candles, period=14):
             adx * (period - 1) + dx
         ) / period
 
+    return (
+        adx,
+        last_plus_di,
+        last_minus_di
+    )
+
+
+def adx_value(candles, period=14):
+
+    adx, _, _ = adx_data(
+        candles,
+        period
+    )
+
     return adx
 
+
+# =========================================================
+# SUPERTREND
+# =========================================================
 
 def supertrend_direction(
     candles,
@@ -518,11 +596,13 @@ def supertrend_direction(
 
     direction = 0
 
+    previous_valid_index = None
+
     for i, candle in enumerate(candles):
 
         atr = atrs[i]
 
-        if atr is None:
+        if atr is None or atr <= 0:
             continue
 
         middle = (
@@ -543,41 +623,52 @@ def supertrend_direction(
                 else -1
             )
 
+            previous_valid_index = i
+
             continue
 
-        previous_close = candles[i - 1]["close"]
+        previous_close = candles[
+            previous_valid_index
+        ]["close"]
 
-        final_upper = (
-            basic_upper
-            if (
-                basic_upper < final_upper
-                or previous_close > final_upper
-            )
-            else final_upper
-        )
+        previous_upper = final_upper
+        previous_lower = final_lower
 
-        final_lower = (
-            basic_lower
-            if (
-                basic_lower > final_lower
-                or previous_close < final_lower
-            )
-            else final_lower
-        )
+        if (
+            basic_upper < previous_upper
+            or previous_close > previous_upper
+        ):
+
+            final_upper = basic_upper
+
+        else:
+            final_upper = previous_upper
+
+        if (
+            basic_lower > previous_lower
+            or previous_close < previous_lower
+        ):
+
+            final_lower = basic_lower
+
+        else:
+            final_lower = previous_lower
 
         if (
             direction == -1
-            and candle["close"] > final_upper
+            and candle["close"] > previous_upper
         ):
 
             direction = 1
 
         elif (
             direction == 1
-            and candle["close"] < final_lower
+            and candle["close"] < previous_lower
         ):
 
             direction = -1
+
+        previous_valid_index = i
 
     return direction
 
@@ -592,7 +683,8 @@ def trend_direction(candles):
         return 0
 
     closes = [
-        x["close"] for x in candles
+        x["close"]
+        for x in candles
     ]
 
     e20 = ema_series(closes, 20)[-1]
@@ -618,10 +710,52 @@ def trend_direction(candles):
 
 
 # =========================================================
+# SUPPORT / RESISTANCE CLUSTERING
+# =========================================================
+
+def cluster_levels(levels, tolerance):
+
+    if not levels:
+        return []
+
+    levels = sorted(levels)
+
+    clusters = []
+
+    current_cluster = [levels[0]]
+
+    for level in levels[1:]:
+
+        average = sum(
+            current_cluster
+        ) / len(current_cluster)
+
+        if abs(level - average) <= tolerance:
+
+            current_cluster.append(level)
+
+        else:
+
+            clusters.append(
+                sum(current_cluster)
+                / len(current_cluster)
+            )
+
+            current_cluster = [level]
+
+    clusters.append(
+        sum(current_cluster)
+        / len(current_cluster)
+    )
+
+    return clusters
+
+
+# =========================================================
 # MARKET STRUCTURE
 # =========================================================
 
-def structure_data(candles):
+def structure_data(candles, atr=None):
 
     empty = {
         "buy": 0,
@@ -629,22 +763,19 @@ def structure_data(candles):
         "swing_low": None,
         "swing_high": None,
         "support_levels": [],
-        "resistance_levels": []
+        "resistance_levels": [],
     }
 
     if len(candles) < 30:
         return empty
 
-    # Joriy yopilgan shamdan oldingi ma'lumotlar
     data = candles[:-1]
-
     current = candles[-1]
 
     pivot_highs = []
     pivot_lows = []
 
-    # Tasdiqlangan pivotlar:
-    # chapda 2 ta, o'ngda 2 ta sham
+    # Confirmed pivots: 2 candles left and right
     for i in range(2, len(data) - 2):
 
         high = data[i]["high"]
@@ -659,7 +790,7 @@ def structure_data(candles):
 
             pivot_highs.append({
                 "index": i,
-                "price": high
+                "price": high,
             })
 
         if (
@@ -671,13 +802,15 @@ def structure_data(candles):
 
             pivot_lows.append({
                 "index": i,
-                "price": low
+                "price": low,
             })
 
     entry = current["close"]
 
-    # Oxirgi 200 sham ichidagi darajalar
-    cutoff = max(0, len(data) - 200)
+    cutoff = max(
+        0,
+        len(data) - 200
+    )
 
     recent_highs = [
         p for p in pivot_highs
@@ -689,26 +822,39 @@ def structure_data(candles):
         if p["index"] >= cutoff
     ]
 
-    # BUY uchun narxdan yuqoridagi qarshiliklar
-    resistance_levels = sorted(
-        set(
+    tolerance = (
+        max(atr * SUPPORT_CLUSTER_ATR, 0)
+        if atr is not None
+        else 0
+    )
+
+    resistance_levels = cluster_levels(
+        [
             p["price"]
             for p in recent_highs
             if p["price"] > entry
-        )
+        ],
+        tolerance
     )
 
-    # SELL uchun narxdan pastdagi qo'llab-quvvatlashlar
-    support_levels = sorted(
-        set(
+    support_levels = cluster_levels(
+        [
             p["price"]
             for p in recent_lows
             if p["price"] < entry
-        ),
+        ],
+        tolerance
+    )
+
+    resistance_levels = sorted(
+        resistance_levels
+    )
+
+    support_levels = sorted(
+        support_levels,
         reverse=True
     )
 
-    # SL uchun yaqin tasdiqlangan swing
     buy_swing_candidates = [
         p for p in recent_lows
         if p["price"] < entry
@@ -740,25 +886,30 @@ def structure_data(candles):
     buy = 0
     sell = 0
 
-    recent = candles[-21:-1]
+    # -----------------------------------------------------
+    # 1. Liquidity sweep using confirmed pivots
+    # -----------------------------------------------------
 
-    recent_high = max(
-        x["high"] for x in recent
+    recent_pivot_highs = [
+        p for p in recent_highs
+        if p["price"] > current["close"]
+    ][-5:]
+
+    recent_pivot_lows = [
+        p for p in recent_lows
+        if p["price"] < current["close"]
+    ][-5:]
+
+    bullish_sweep = any(
+        current["low"] < p["price"]
+        and current["close"] > p["price"]
+        for p in recent_pivot_lows
     )
 
-    recent_low = min(
-        x["low"] for x in recent
-    )
-
-    # 1. Liquidity sweep
-    bullish_sweep = (
-        current["low"] < recent_low
-        and current["close"] > recent_low
-    )
-
-    bearish_sweep = (
-        current["high"] > recent_high
-        and current["close"] < recent_high
+    bearish_sweep = any(
+        current["high"] > p["price"]
+        and current["close"] < p["price"]
+        for p in recent_pivot_highs
     )
 
     if bullish_sweep:
@@ -767,17 +918,40 @@ def structure_data(candles):
     if bearish_sweep:
         sell += 1
 
-    # 2. Uch shamli FVG
+    # -----------------------------------------------------
+    # 2. Three-candle FVG + impulse filter
+    # -----------------------------------------------------
+
     first = candles[-3]
     middle = candles[-2]
 
+    middle_body = abs(
+        middle["close"] - middle["open"]
+    )
+
+    impulse_ok = (
+        atr is not None
+        and atr > 0
+        and middle_body >= atr * FVG_IMPULSE_ATR
+    )
+
+    bullish_gap = (
+        current["low"] - first["high"]
+    )
+
+    bearish_gap = (
+        first["low"] - current["high"]
+    )
+
     bullish_fvg = (
-        current["low"] > first["high"]
+        impulse_ok
+        and bullish_gap >= atr * FVG_MIN_ATR
         and middle["close"] > middle["open"]
     )
 
     bearish_fvg = (
-        current["high"] < first["low"]
+        impulse_ok
+        and bearish_gap >= atr * FVG_MIN_ATR
         and middle["close"] < middle["open"]
     )
 
@@ -787,7 +961,10 @@ def structure_data(candles):
     if bearish_fvg:
         sell += 1
 
-    # 3. Kuchli yopilish shamini tekshirish
+    # -----------------------------------------------------
+    # 3. Strong candle close
+    # -----------------------------------------------------
+
     candle_range = (
         current["high"] - current["low"]
     )
@@ -802,12 +979,14 @@ def structure_data(candles):
             current["close"] > current["open"]
             and close_position >= 0.75
         ):
+
             buy += 1
 
         elif (
             current["close"] < current["open"]
             and close_position <= 0.25
         ):
+
             sell += 1
 
     return {
@@ -816,7 +995,7 @@ def structure_data(candles):
         "swing_low": swing_low,
         "swing_high": swing_high,
         "support_levels": support_levels,
-        "resistance_levels": resistance_levels
+        "resistance_levels": resistance_levels,
     }
 
 
@@ -824,7 +1003,13 @@ def structure_data(candles):
 # LEVEL FILTER
 # =========================================================
 
-def filter_levels(levels, entry, risk, atr, side):
+def filter_levels(
+    levels,
+    entry,
+    risk,
+    atr,
+    side
+):
 
     valid = []
 
@@ -852,7 +1037,6 @@ def filter_levels(levels, entry, risk, atr, side):
     else:
         valid.sort(reverse=True)
 
-    # Juda yaqin darajalarni birlashtirish
     filtered = []
 
     minimum_gap = atr * 0.25
@@ -860,10 +1044,15 @@ def filter_levels(levels, entry, risk, atr, side):
     for level in valid:
 
         if not filtered:
+
             filtered.append(level)
             continue
 
-        if abs(level - filtered[-1]) >= minimum_gap:
+        if (
+            abs(level - filtered[-1])
+            >= minimum_gap
+        ):
+
             filtered.append(level)
 
     return filtered
@@ -901,15 +1090,19 @@ def usd_value_per_price_unit(symbol, entry):
     if symbol in (
         "EURUSD",
         "GBPUSD",
-        "AUDUSD"
+        "AUDUSD",
     ):
         return 1000.0
 
     if symbol in (
         "USDJPY",
         "USDCHF",
-        "USDCAD"
+        "USDCAD",
     ):
+
+        if entry <= 0:
+            return None
+
         return 1000.0 / entry
 
     return None
@@ -929,7 +1122,8 @@ def analyze(symbol, timeframe, candles, h1, h4):
         return None
 
     closes = [
-        x["close"] for x in candles
+        x["close"]
+        for x in candles
     ]
 
     current = candles[-1]
@@ -948,7 +1142,9 @@ def analyze(symbol, timeframe, candles, h1, h4):
 
     atr = atrs[-1]
 
-    adx = adx_value(candles)
+    adx, plus_di, minus_di = adx_data(
+        candles
+    )
 
     if any(
         x is None
@@ -958,7 +1154,9 @@ def analyze(symbol, timeframe, candles, h1, h4):
             e200,
             rsi,
             atr,
-            adx
+            adx,
+            plus_di,
+            minus_di,
         )
     ):
         return None
@@ -974,7 +1172,10 @@ def analyze(symbol, timeframe, candles, h1, h4):
     h1_dir = trend_direction(h1)
     h4_dir = trend_direction(h4)
 
-    structure = structure_data(candles)
+    structure = structure_data(
+        candles,
+        atr
+    )
 
     buy = 0
     sell = 0
@@ -1007,21 +1208,21 @@ def analyze(symbol, timeframe, candles, h1, h4):
     elif 32 <= rsi <= 48:
         sell += 10
 
-    # 5. ADX
+    # 5. ADX strength + DI direction
     if adx >= 22:
 
-        if e20 > e50:
+        if plus_di > minus_di:
             buy += 10
 
-        elif e20 < e50:
+        elif minus_di > plus_di:
             sell += 10
 
     elif adx >= 18:
 
-        if e20 > e50:
+        if plus_di > minus_di:
             buy += 5
 
-        elif e20 < e50:
+        elif minus_di > plus_di:
             sell += 5
 
     # 6. H1
@@ -1049,7 +1250,10 @@ def analyze(symbol, timeframe, candles, h1, h4):
         structure["sell"] * 5
     )
 
+    # -----------------------------------------------------
     # Signal direction
+    # -----------------------------------------------------
+
     if (
         buy >= MIN_SCORE
         and buy > sell
@@ -1149,11 +1353,9 @@ def analyze(symbol, timeframe, candles, h1, h4):
     # =====================================================
 
     if side == "BUY":
-
         levels = structure["resistance_levels"]
 
     else:
-
         levels = structure["support_levels"]
 
     valid_levels = filter_levels(
@@ -1167,26 +1369,19 @@ def analyze(symbol, timeframe, candles, h1, h4):
     if not valid_levels:
         return None
 
-    # 1.5R yoki yuqori bo'lgan eng yaqin darajani afzal ko'ramiz
-    preferred_levels = []
-
-    for level in valid_levels:
-
-        rr = abs(level - entry) / risk
-
-        if rr >= PREFERRED_REWARD_RISK:
-            preferred_levels.append(level)
+    preferred_levels = [
+        level
+        for level in valid_levels
+        if abs(level - entry) / risk
+        >= PREFERRED_REWARD_RISK
+    ]
 
     if preferred_levels:
-
         first_tp = preferred_levels[0]
 
     else:
-
-        # 1.5R topilmasa, 1:1 yoki undan yuqori
         first_tp = valid_levels[0]
 
-    # Birinchi TP dan keyingi tasdiqlangan darajalar
     if side == "BUY":
 
         tps = [
@@ -1203,7 +1398,6 @@ def analyze(symbol, timeframe, candles, h1, h4):
             if level <= first_tp
         ]
 
-    # Takroriy yoki juda yaqin darajalarni olib tashlash
     final_tps = []
 
     minimum_gap = atr * 0.25
@@ -1215,7 +1409,10 @@ def analyze(symbol, timeframe, candles, h1, h4):
             final_tps.append(level)
             continue
 
-        if abs(level - final_tps[-1]) >= minimum_gap:
+        if (
+            abs(level - final_tps[-1])
+            >= minimum_gap
+        ):
 
             final_tps.append(level)
 
@@ -1224,10 +1421,9 @@ def analyze(symbol, timeframe, candles, h1, h4):
     if not final_tps:
         return None
 
-    # TP1 minimum 1R tekshiruvi
-    first_rr = abs(
-        final_tps[0] - entry
-    ) / risk
+    first_rr = (
+        abs(final_tps[0] - entry) / risk
+    )
 
     if first_rr < MIN_REWARD_RISK:
         return None
@@ -1276,6 +1472,8 @@ def analyze(symbol, timeframe, candles, h1, h4):
         "candle_time": current["time"],
 
         "adx": adx,
+        "plus_di": plus_di,
+        "minus_di": minus_di,
         "rsi": rsi,
     }
 
@@ -1314,7 +1512,6 @@ def get_users():
 def send_telegram(chat_id, message):
 
     response = session.post(
-
         f"https://api.telegram.org/"
         f"bot{BOT_TOKEN}/sendMessage",
 
@@ -1322,7 +1519,7 @@ def send_telegram(chat_id, message):
             "chat_id": str(chat_id),
             "text": message,
             "parse_mode": "HTML",
-            "disable_web_page_preview": True
+            "disable_web_page_preview": True,
         },
 
         timeout=20
@@ -1360,13 +1557,12 @@ def format_signal(signal):
         f"🎯 Entry: <code>{fmt(signal['entry'])}</code>",
         f"🛑 SL: <code>{fmt(signal['sl'])}</code>",
         "",
-        "<b>TAKE PROFITS</b>"
+        "<b>TAKE PROFITS</b>",
     ]
 
     for i, tp in enumerate(signal["tps"]):
 
         reward = signal["rewards_usd"][i]
-
         rr = signal["reward_risks"][i]
 
         lines.append(
@@ -1390,8 +1586,11 @@ def format_signal(signal):
 
         (
             f"ADX: {signal['adx']:.1f} "
-            f"| RSI: {signal['rsi']:.1f}"
+            f"| +DI: {signal['plus_di']:.1f} "
+            f"| -DI: {signal['minus_di']:.1f}"
         ),
+
+        f"RSI: {signal['rsi']:.1f}",
 
         "EMA + RSI + ADX + Supertrend",
 
@@ -1408,7 +1607,7 @@ def format_signal(signal):
         (
             "⚠️ Avval demo hisobda tekshiring. "
             "Bu avtomatik savdo emas."
-        )
+        ),
     ])
 
     return "\n".join(lines)
@@ -1430,9 +1629,7 @@ def github_headers():
 
     return {
         "Authorization": f"Bearer {GITHUB_TOKEN}",
-
         "Accept": "application/vnd.github+json",
-
         "X-GitHub-Api-Version": "2022-11-28",
     }
 
@@ -1467,7 +1664,13 @@ def load_state():
 
     state = json.loads(raw)
 
+    if not isinstance(state, dict):
+        raise RuntimeError("State formati noto'g'ri")
+
     state.setdefault("signals", {})
+
+    if not isinstance(state["signals"], dict):
+        raise RuntimeError("State signals formati noto'g'ri")
 
     return state, data["sha"]
 
@@ -1481,7 +1684,7 @@ def save_state(state, sha):
     ).encode("utf-8")
 
     payload = {
-        "message": "Update Forex V4.2 signal state",
+        "message": "Update Forex V4.3 signal state",
 
         "content": base64.b64encode(
             raw
@@ -1505,6 +1708,64 @@ def save_state(state, sha):
 
     response.raise_for_status()
 
+    result = response.json()
+
+    content = result.get("content") or {}
+
+    return content.get("sha", sha)
+
+
+# =========================================================
+# SIGNAL DELIVERY STATE
+# =========================================================
+
+def get_delivery_record(state, key, signature, users):
+
+    old = state["signals"].get(key)
+
+    # Eski format: key -> signature
+    # Eski signal allaqachon yuborilgan deb olinadi.
+    if isinstance(old, str):
+
+        if old == signature:
+            return None
+
+        return {
+            "signature": signature,
+            "target_users": list(users),
+            "delivered_to": [],
+        }
+
+    if isinstance(old, dict):
+
+        if old.get("signature") == signature:
+
+            target_users = old.get(
+                "target_users",
+                users
+            )
+
+            delivered_to = old.get(
+                "delivered_to",
+                []
+            )
+
+            return {
+                "signature": signature,
+                "target_users": [
+                    str(x) for x in target_users
+                ],
+                "delivered_to": [
+                    str(x) for x in delivered_to
+                ],
+            }
+
+    return {
+        "signature": signature,
+        "target_users": list(users),
+        "delivered_to": [],
+    }
+
 
 # =========================================================
 # MAIN
@@ -1513,9 +1774,11 @@ def save_state(state, sha):
 def main():
 
     logging.info(
-        "Forex V4.2 ishga tushdi"
+        "Forex V4.3 ishga tushdi"
     )
 
+    # State yuklanmasa, bot davom etmaydi.
+    # Bu takroriy signal xavfini kamaytiradi.
     state, state_sha = load_state()
 
     users = get_users()
@@ -1524,6 +1787,9 @@ def main():
         "Qabul qiluvchilar: %s",
         len(users)
     )
+
+    if not users:
+        raise RuntimeError("Qabul qiluvchilar topilmadi")
 
     cache = {}
 
@@ -1612,16 +1878,32 @@ def main():
                     f"{signal['side']}"
                 )
 
-                if (
-                    state["signals"].get(key)
-                    == signature
-                ):
+                record = get_delivery_record(
+                    state,
+                    key,
+                    signature,
+                    users
+                )
+
+                if record is None:
+                    continue
+
+                # Allaqachon yuborilgan foydalanuvchilarni
+                # qayta yubormaymiz.
+                pending_users = [
+                    uid
+                    for uid in record["target_users"]
+                    if uid not in record["delivered_to"]
+                ]
+
+                if not pending_users:
                     continue
 
                 candidates.append((
                     key,
-                    signature,
-                    signal
+                    record,
+                    signal,
+                    pending_users,
                 ))
 
             except Exception:
@@ -1643,14 +1925,15 @@ def main():
     # -----------------------------------------------------
 
     sent = 0
+    state_changed = False
 
-    for key, signature, signal in candidates:
-
-        delivered = 0
+    for key, record, signal, pending_users in candidates:
 
         message = format_signal(signal)
 
-        for uid in users:
+        delivered_now = 0
+
+        for uid in pending_users:
 
             try:
 
@@ -1659,7 +1942,11 @@ def main():
                     message
                 )
 
-                delivered += 1
+                if uid not in record["delivered_to"]:
+
+                    record["delivered_to"].append(uid)
+
+                delivered_now += 1
 
             except Exception:
 
@@ -1670,36 +1957,48 @@ def main():
 
             time.sleep(0.15)
 
-        if delivered:
+        # Har bir signalning yetkazish holati alohida saqlanadi.
+        state["signals"][key] = record
 
-            state["signals"][key] = signature
+        state_changed = True
+
+        if delivered_now:
 
             sent += 1
 
             logging.info(
-                "%s %s yuborildi (%s)",
+                "%s %s: %s foydalanuvchiga yuborildi",
                 key,
                 signal["side"],
-                delivered
+                delivered_now
+            )
+
+        if len(record["delivered_to"]) < len(
+            record["target_users"]
+        ):
+
+            logging.warning(
+                "%s: ayrim foydalanuvchilarga yuborish kutilmoqda",
+                key
             )
 
     # -----------------------------------------------------
     # State saqlash
     # -----------------------------------------------------
 
-    if sent:
+    if state_changed:
 
-        save_state(
+        state_sha = save_state(
             state,
             state_sha
         )
 
         logging.info(
-            "V4 state GitHub'ga saqlandi"
+            "V4.3 state GitHub'ga saqlandi"
         )
 
     logging.info(
-        "V4.2 yakunlandi. Yangi signallar: %s",
+        "V4.3 yakunlandi. Yangi yuborilgan signallar: %s",
         sent
     )
 
