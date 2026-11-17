@@ -101,7 +101,7 @@ def get_candles(symbol, interval):
         "-fn", file_name,
         "--cache",
         "--retries", "3",
-        "--retry-on-empty",
+        
     ]
 
     result = subprocess.run(
