@@ -423,12 +423,15 @@ def usd_value_per_price_unit(symbol, entry):
     return None
 
 
+
 def analyze(symbol, timeframe, candles, h1, h4):
     closes = [x["close"] for x in candles]
     current = candles[-1]
+
     e20 = ema_series(closes, 20)[-1]
     e50 = ema_series(closes, 50)[-1]
     e200 = ema_series(closes, 200)[-1]
+
     rsi = rsi_series(closes)[-1]
     atrs = atr_series(candles, ATR_PERIOD)
     atr = atrs[-1]
@@ -436,60 +439,173 @@ def analyze(symbol, timeframe, candles, h1, h4):
 
     if any(x is None for x in (e20, e50, e200, rsi, atr, adx)):
         return None
+
     if atr <= 0 or adx < 18:
         return None
 
     st = supertrend_direction(candles, atrs)
-    h1_dir, h4_dir = trend_direction(h1), trend_direction(h4)
+    h1_dir = trend_direction(h1)
+    h4_dir = trend_direction(h4)
     structure = structure_data(candles)
 
-    buy = sell = 0
+    buy = 0
+    sell = 0
+
+    # 1. EMA 20 / EMA 50 — 15 ball
     if e20 > e50:
         buy += 15
     elif e20 < e50:
         sell += 15
 
+    # 2. Narx EMA 200 dan yuqori yoki past — 10 ball
     if current["close"] > e200:
         buy += 10
     elif current["close"] < e200:
         sell += 10
 
+    # 3. Supertrend yo'nalishi — 10 ball
     if st == 1:
-        buy += 12
+        buy += 10
     elif st == -1:
-        sell += 12
+        sell += 10
 
+    # 4. RSI momentum — 10 ball
     if 52 <= rsi <= 68:
         buy += 10
     elif 32 <= rsi <= 48:
         sell += 10
 
+    # 5. ADX trend kuchi — 10 ball
     if adx >= 22:
         if e20 > e50:
             buy += 10
         elif e20 < e50:
             sell += 10
+    elif adx >= 18:
+        if e20 > e50:
+            buy += 5
+        elif e20 < e50:
+            sell += 5
 
+    # 6. H1 trend tasdig'i — 15 ball
     if h1_dir == 1:
-        buy += 10
+        buy += 15
     elif h1_dir == -1:
-        sell += 10
-    if h4_dir == 1:
-        buy += 10
-    elif h4_dir == -1:
-        sell += 10
+        sell += 15
 
+    # 7. H4 trend tasdig'i — 15 ball
+    if h4_dir == 1:
+        buy += 15
+    elif h4_dir == -1:
+        sell += 15
+
+    # 8. Narx strukturasi — 15 ball
     if structure["buy"]:
         buy += min(15, structure["buy"] * 5)
+
     if structure["sell"]:
         sell += min(15, structure["sell"] * 5)
 
-    if buy >= MIN_SCORE and buy > sell and h1_dir == 1 and h4_dir == 1:
+    # Yakuniy signal tanlash
+    if (
+        buy >= MIN_SCORE
+        and buy > sell
+        and h1_dir == 1
+        and h4_dir == 1
+    ):
         side, score = "BUY", buy
-    elif sell >= MIN_SCORE and sell > buy and h1_dir == -1 and h4_dir == -1:
+
+    elif (
+        sell >= MIN_SCORE
+        and sell > buy
+        and h1_dir == -1
+        and h4_dir == -1
+    ):
         side, score = "SELL", sell
+
     else:
         return None
+
+    # Stop Loss hisoblash
+    if side == "BUY":
+        structural_sl = structure["swing_low"]
+        atr_sl = current["close"] - atr * 1.5
+
+        sl = (
+            min(atr_sl, structural_sl)
+            if structural_sl is not None
+            else atr_sl
+        )
+
+        risk = current["close"] - sl
+
+    else:
+        structural_sl = structure["swing_high"]
+        atr_sl = current["close"] + atr * 1.5
+
+        sl = (
+            max(atr_sl, structural_sl)
+            if structural_sl is not None
+            else atr_sl
+        )
+
+        risk = sl - current["close"]
+
+    if (
+        risk <= 0
+        or risk < atr * SL_ATR_MIN
+        or risk > atr * SL_ATR_MAX
+    ):
+        return None
+
+    # Take Profit hisoblash
+    if side == "BUY":
+        tps = [
+            current["close"] + risk * x
+            for x in TP_R_MULTIPLES
+        ]
+    else:
+        tps = [
+            current["close"] - risk * x
+            for x in TP_R_MULTIPLES
+        ]
+
+    reward_risk = abs(tps[0] - current["close"]) / risk
+
+    if reward_risk < MIN_REWARD_RISK:
+        return None
+
+    # Taxminiy dollar riski
+    usd_factor = usd_value_per_price_unit(
+        symbol, current["close"]
+    )
+
+    if usd_factor is None:
+        return None
+
+    risk_usd = risk * usd_factor
+    rewards = [
+        risk_usd * x
+        for x in TP_R_MULTIPLES
+    ]
+
+    return {
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "side": side,
+        "score": score,
+        "entry": current["close"],
+        "sl": sl,
+        "tp1": tps[0],
+        "tp2": tps[1],
+        "tp3": tps[2],
+        "risk_usd": risk_usd,
+        "rewards_usd": rewards,
+        "candle_time": current["time"],
+        "adx": adx,
+        "rsi": rsi,
+    }
+
 
     if side == "BUY":
         structural_sl = structure["swing_low"]
