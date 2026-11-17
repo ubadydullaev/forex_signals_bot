@@ -8,6 +8,7 @@
   "heartbeat_date": "2026-11-17",
   "signals": {
     "EURUSD_M15": "2026-11-16T09:30:00Z_SELL",
-    "XAUUSD_M15": "2026-11-17T01:30:00Z_BUY"
+    "XAUUSD_M15": "2026-11-17T01:30:00Z_BUY",
+    "XAUUSD_M30": "2026-11-17T05:00:00Z_BUY"
   }
 }
