@@ -7,7 +7,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 import requests
-
+import subprocess
 # ================= CONFIG =================
 
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
@@ -19,7 +19,7 @@ GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
 REPOSITORY = os.environ["GITHUB_REPOSITORY"]
 BRANCH = os.environ.get("GITHUB_REF_NAME", "main")
 
-API_URL = "https://biquote.io/api/{symbol}/ohlc"
+
 STATE_FILE = "bot_v4_state.json"
 
 SYMBOLS = [
@@ -66,84 +66,7 @@ def time_key(value):
 
 
 
-def get_candles(symbol, interval):
-    interval_minutes = {
-        "15m": 15,
-        "30m": 30,
-        "1h": 60,
-        "4h": 240,
-    }[interval]
 
-    end_time = datetime.now(timezone.utc)
-    start_time = end_time - timedelta(
-        minutes=interval_minutes * 900
-    )
-
-    params = {
-        "interval": interval,
-        "limit": 1000,
-        "from": start_time.isoformat().replace("+00:00", "Z"),
-        "to": end_time.isoformat().replace("+00:00", "Z"),
-    }
-
-    response = session.get(
-        API_URL.format(symbol=symbol),
-        params=params,
-        timeout=30
-    )
-    response.raise_for_status()
-    payload = response.json()
-
-    if isinstance(payload, dict):
-        bars = payload.get(
-            "bars", payload.get("data", payload.get("candles", []))
-        )
-    else:
-        bars = payload
-
-    if not isinstance(bars, list):
-        raise ValueError("API candle ro'yxatini qaytarmadi")
-    logging.info(
-        "BIQUOTE DEBUG | %s %s | URL: %s | COUNT: %s | FIRST: %s | LAST: %s",
-        symbol,
-        interval,
-        response.url,
-        len(bars),
-        bars[0] if bars else None,
-        bars[-1] if bars else None
-            )
-    result = []
-    seen = set()
-
-    for item in bars:
-        if not isinstance(item, dict) or item.get("isOpen") is True:
-            continue
-
-        try:
-            stamp = str(item.get("openTime", item.get("timestamp", item.get("time", ""))))
-            candle = {
-                "time": stamp,
-                "open": float(item["open"]),
-                "high": float(item["high"]),
-                "low": float(item["low"]),
-                "close": float(item["close"]),
-            }
-
-            if stamp and stamp not in seen:
-                result.append(candle)
-                seen.add(stamp)
-
-        except (KeyError, TypeError, ValueError):
-            continue
-
-    result.sort(key=lambda x: time_key(x["time"]))
-
-    if len(result) < 220:
-        raise ValueError(
-            f"{symbol} {interval}: shamlar yetarli emas ({len(result)})"
-        )
-
-    return result
 
 
 
