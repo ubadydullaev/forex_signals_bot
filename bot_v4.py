@@ -1144,11 +1144,8 @@ def usd_value_per_price_unit(symbol, entry):
         return 1000.0 / entry
 
     return None
-tracking_changed = evaluate_tracked_signals(
-    state,
-    cache,
-    send_telegram
-)
+
+
 
 # =========================================================
 # SIGNAL ANALYSIS
@@ -1886,7 +1883,11 @@ def main():
                     tf,
                     exc
                 )
-
+    tracking_changed = evaluate_tracked_signals(
+        state,
+        cache,
+        send_telegram
+    )
     # -----------------------------------------------------
     # Signal tahlili
     # -----------------------------------------------------
@@ -1988,7 +1989,7 @@ def main():
     # -----------------------------------------------------
 
     sent = 0
-    state_changed = False
+    state_changed = tracking_changed
 
     for key, record, signal, pending_users in candidates:
 
