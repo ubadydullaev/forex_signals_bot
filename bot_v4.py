@@ -1520,8 +1520,7 @@ def analyze(symbol, timeframe, candles, h1, h4):
         "adx": adx,
         "plus_di": plus_di,
         "minus_di": minus_di,
-        "rsi": rsi,
-          "atr": atr,
+        "rsi": rsi,"atr": atr,
         "atr_risk_ratio": risk / atr,
         "ema20": e20,
         "ema50": e50,
@@ -1530,7 +1529,8 @@ def analyze(symbol, timeframe, candles, h1, h4):
         "h1_direction": h1_dir,
         "h4_direction": h4_dir,
         "structure_buy": structure["buy"],
-        "structure_sell": structure["sell"],  }
+        "structure_sell": 
+        structure["sell"],  }
 
 
 # =========================================================
