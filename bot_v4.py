@@ -2022,13 +2022,7 @@ def main():
                     h1,
                     h4
                 )
-                signal = analyze(
-                    symbol,
-                    tf,
-                    candles,
-                    h1,
-                    h4
-                )
+                
 
                 if signal is None:
                     continue
