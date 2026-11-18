@@ -331,7 +331,7 @@ def run_advanced_analysis(timeframe, candles, h1, h4, d1):
     entry_df = pd.DataFrame(candles)
     higher_timeframes = {}
 
-        if timeframe in ("M15", "M30"):
+    if timeframe in ("M15", "M30"):
         if h1:
             higher_timeframes["H1"] = pd.DataFrame(h1)
 
