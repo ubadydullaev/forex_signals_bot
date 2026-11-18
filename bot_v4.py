@@ -1984,7 +1984,36 @@ def main():
                 continue
 
             try:
+                try:
 
+                    advanced = run_advanced_analysis(
+                        tf,
+                        candles,
+                        h1,
+                        h4,
+                        d1
+                    )
+
+                    logging.info(
+                        "%s %s ADVANCED: signal=%s BUY=%s SELL=%s margin=%s HTF=%s",
+                        symbol,
+                        tf,
+                        advanced.get("signal"),
+                        advanced.get("buy_score"),
+                        advanced.get("sell_score"),
+                        advanced.get("score_margin"),
+                        advanced.get("structure", {}).get(
+                            "higher_timeframe_bias"
+                        )
+                    )
+
+                except Exception:
+
+                    logging.exception(
+                        "%s %s advanced tahlil xatosi",
+                        symbol,
+                        tf
+    )
                 signal = analyze(
                     symbol,
                     tf,
