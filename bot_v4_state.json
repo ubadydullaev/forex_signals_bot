@@ -179,7 +179,7 @@
       ]
     },
     "BRENT_H1": {
-      "signature": "2026-11-18T18:00:00+00:00_SELL",
+      "signature": "2026-11-18T19:00:00+00:00_SELL",
       "target_users": [
         "1867555949",
         "1906447505",
@@ -266,7 +266,7 @@
       ]
     },
     "BRENT_M30": {
-      "signature": "2026-11-18T18:30:00+00:00_SELL",
+      "signature": "2026-11-18T19:30:00+00:00_SELL",
       "target_users": [
         "1867555949",
         "1906447505",
@@ -1011,8 +1011,11 @@
         "1906447505",
         "8678763398"
       ],
-      "notified_to": [],
-      "status": "OPEN",
+      "notified_to": [
+        "1906447505",
+        "8678763398"
+      ],
+      "status": "SL_HIT",
       "diagnostics": {
         "score": 80,
         "adx": 22.61252168552588,
@@ -1030,7 +1033,8 @@
         "structure_buy": 0,
         "structure_sell": 1
       },
-      "created_at": "2026-11-18T17:01:34.080531+00:00"
+      "created_at": "2026-11-18T17:01:34.080531+00:00",
+      "result_candle_time": "2026-11-18T19:00:00+00:00"
     },
     "NAS100_M15_2026-11-18T17:00:00+00:00_SELL": {
       "symbol": "NAS100",
@@ -1736,6 +1740,76 @@
         "structure_sell": 0
       },
       "created_at": "2026-11-18T19:16:07.674827+00:00"
+    },
+    "BRENT_M30_2026-11-18T19:30:00+00:00_SELL": {
+      "symbol": "BRENT",
+      "timeframe": "M30",
+      "side": "SELL",
+      "entry": 91.745,
+      "sl": 92.60297244712237,
+      "tp1": 90.314,
+      "signal_candle_time": "2026-11-18T19:30:00+00:00",
+      "signal_candle_end_ms": 1795032000000,
+      "delivered_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "notified_to": [],
+      "status": "OPEN",
+      "diagnostics": {
+        "score": 90,
+        "adx": 24.35422119724618,
+        "plus_di": 18.23822174471674,
+        "minus_di": 24.143254204410653,
+        "rsi": 46.73854581223104,
+        "atr": 0.5719816314149063,
+        "atr_risk_ratio": 1.5000000000000082,
+        "ema20": 91.87947533172445,
+        "ema50": 92.25117885899932,
+        "ema200": 93.09873721128352,
+        "supertrend": -1,
+        "h1_direction": -1,
+        "h4_direction": -1,
+        "structure_buy": 1,
+        "structure_sell": 1
+      },
+      "created_at": "2026-11-18T20:01:32.015813+00:00"
+    },
+    "BRENT_H1_2026-11-18T19:00:00+00:00_SELL": {
+      "symbol": "BRENT",
+      "timeframe": "H1",
+      "side": "SELL",
+      "entry": 91.745,
+      "sl": 92.81712210011713,
+      "tp1": 89.146,
+      "signal_candle_time": "2026-11-18T19:00:00+00:00",
+      "signal_candle_end_ms": 1795032000000,
+      "delivered_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "notified_to": [],
+      "status": "OPEN",
+      "diagnostics": {
+        "score": 85,
+        "adx": 24.057422902753473,
+        "plus_di": 20.32467663493566,
+        "minus_di": 29.432806538287142,
+        "rsi": 44.363834492445584,
+        "atr": 0.7147480667447559,
+        "atr_risk_ratio": 1.499999999999991,
+        "ema20": 92.06640225810969,
+        "ema50": 92.68279220471112,
+        "ema200": 94.62325761918666,
+        "supertrend": -1,
+        "h1_direction": -1,
+        "h4_direction": -1,
+        "structure_buy": 2,
+        "structure_sell": 0
+      },
+      "created_at": "2026-11-18T20:01:32.862971+00:00"
     }
   }
 }
