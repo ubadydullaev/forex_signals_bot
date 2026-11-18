@@ -326,18 +326,26 @@ def get_candles(symbol, interval):
 # ADVANCED ANALYSIS DATA
 # =========================================================
 
-def run_advanced_analysis(candles, h1, h4):
+def run_advanced_analysis(timeframe, candles, h1, h4, d1):
 
     entry_df = pd.DataFrame(candles)
-    h1_df = pd.DataFrame(h1)
-    h4_df = pd.DataFrame(h4)
+    higher_timeframes = {}
+
+    if timeframe in ("M15", "M30", "H1"):
+        if h1:
+            higher_timeframes["H1"] = pd.DataFrame(h1)
+
+    if timeframe in ("M15", "M30", "H1"):
+        if h4:
+            higher_timeframes["H4"] = pd.DataFrame(h4)
+
+    if timeframe in ("M15", "M30", "H1", "H4"):
+        if d1:
+            higher_timeframes["D1"] = pd.DataFrame(d1)
 
     return analyze_advanced(
         entry_df=entry_df,
-        higher_timeframes={
-            "H1": h1_df,
-            "H4": h4_df,
-        }
+        higher_timeframes=higher_timeframes,
     )
 
 # =========================================================
