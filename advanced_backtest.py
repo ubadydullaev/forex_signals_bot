@@ -296,7 +296,7 @@ def run_one_backtest(symbol, tf, histories):
             "outcome": outcome,
             "r": r_multiple,
         })
-
+        next_free_index = exit_index
     return trades
 
 
