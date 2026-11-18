@@ -59,6 +59,18 @@ def register_tracked_signal(state, signal, record):
         "delivered_to": delivered,
         "notified_to": [],
         "status": "OPEN",
+                "diagnostics": {
+            name: signal[name]
+            for name in (
+                "score", "adx", "plus_di", "minus_di",
+                "rsi", "atr", "atr_risk_ratio",
+                "ema20", "ema50", "ema200",
+                "supertrend", "h1_direction",
+                "h4_direction", "structure_buy",
+                "structure_sell"
+            )
+            if name in signal
+        },
         "created_at": datetime.now().astimezone().isoformat(),
     }
 
