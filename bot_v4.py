@@ -131,11 +131,12 @@ def get_candles(symbol, interval):
     if symbol == "BTCUSD":
         return get_btc_candles(interval)
     timeframe_map = {
-        "15m": ("m15", 7, 15 * 60 * 1000),
-        "30m": ("m30", 10, 30 * 60 * 1000),
-        "1h": ("h1", 20, 60 * 60 * 1000),
-        "4h": ("h4", 75, 4 * 60 * 60 * 1000),
-    }
+    "15m": ("m15", 7, 15 * 60 * 1000),
+    "30m": ("m30", 10, 30 * 60 * 1000),
+    "1h": ("h1", 20, 60 * 60 * 1000),
+    "4h": ("h4", 75, 4 * 60 * 60 * 1000),
+    "1d": ("d1", 500, 24 * 60 * 60 * 1000),
+}
 
     if interval not in timeframe_map:
         raise ValueError(
