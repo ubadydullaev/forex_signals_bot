@@ -1530,9 +1530,8 @@ def analyze(symbol, timeframe, candles, h1, h4):
         "h1_direction": h1_dir,
         "h4_direction": h4_dir,
         "structure_buy": structure["buy"],
-        "structure_sell": 
- structure["sell"], 
-     }
+                "structure_sell": structure["sell"],
+    }
 
 
 # =========================================================
