@@ -107,7 +107,7 @@
       ]
     },
     "NAS100_M30": {
-      "signature": "2026-11-18T01:30:00+00:00_SELL",
+      "signature": "2026-11-18T15:30:00+00:00_SELL",
       "target_users": [
         "1906447505",
         "8678763398"
@@ -151,7 +151,7 @@
       ]
     },
     "NAS100_H4": {
-      "signature": "2026-11-18T08:00:00+00:00_SELL",
+      "signature": "2026-11-18T12:00:00+00:00_SELL",
       "target_users": [
         "1906447505",
         "8678763398"
@@ -173,7 +173,7 @@
       ]
     },
     "BRENT_H1": {
-      "signature": "2026-11-18T10:00:00+00:00_SELL",
+      "signature": "2026-11-18T15:00:00+00:00_SELL",
       "target_users": [
         "1906447505",
         "8678763398"
@@ -217,7 +217,7 @@
       ]
     },
     "NAS100_M15": {
-      "signature": "2026-11-18T15:30:00+00:00_SELL",
+      "signature": "2026-11-18T15:45:00+00:00_SELL",
       "target_users": [
         "1906447505",
         "8678763398"
@@ -512,6 +512,142 @@
         "structure_sell": 1
       },
       "created_at": "2026-11-18T15:46:10.189180+00:00"
+    },
+    "NAS100_M15_2026-11-18T15:45:00+00:00_SELL": {
+      "symbol": "NAS100",
+      "timeframe": "M15",
+      "side": "SELL",
+      "entry": 27059.065,
+      "sl": 27231.01435568446,
+      "tp1": 26759.332,
+      "signal_candle_time": "2026-11-18T15:45:00+00:00",
+      "signal_candle_end_ms": 1795017600000,
+      "delivered_to": [
+        "1906447505",
+        "8678763398"
+      ],
+      "notified_to": [],
+      "status": "OPEN",
+      "diagnostics": {
+        "score": 85,
+        "adx": 32.980831567873004,
+        "plus_di": 8.366467524630714,
+        "minus_di": 27.77581225735615,
+        "rsi": 43.734235451227654,
+        "atr": 114.63290378964159,
+        "atr_risk_ratio": 1.4999999999999871,
+        "ema20": 27143.78623766511,
+        "ema50": 27171.35927293211,
+        "ema200": 27278.93013303836,
+        "supertrend": -1,
+        "h1_direction": -1,
+        "h4_direction": -1,
+        "structure_buy": 2,
+        "structure_sell": 0
+      },
+      "created_at": "2026-11-18T16:01:21.966619+00:00"
+    },
+    "NAS100_H4_2026-11-18T12:00:00+00:00_SELL": {
+      "symbol": "NAS100",
+      "timeframe": "H4",
+      "side": "SELL",
+      "entry": 27059.065,
+      "sl": 27504.781445421715,
+      "tp1": 26264.721,
+      "signal_candle_time": "2026-11-18T12:00:00+00:00",
+      "signal_candle_end_ms": 1795017600000,
+      "delivered_to": [
+        "1906447505",
+        "8678763398"
+      ],
+      "notified_to": [],
+      "status": "OPEN",
+      "diagnostics": {
+        "score": 85,
+        "adx": 22.289534608487543,
+        "plus_di": 15.940936408190819,
+        "minus_di": 27.012848053704708,
+        "rsi": 40.33124440519568,
+        "atr": 297.14429694781,
+        "atr_risk_ratio": 1.5000000000000044,
+        "ema20": 27375.66297619334,
+        "ema50": 27609.72379729597,
+        "ema200": 28380.51392350671,
+        "supertrend": -1,
+        "h1_direction": -1,
+        "h4_direction": -1,
+        "structure_buy": 0,
+        "structure_sell": 0
+      },
+      "created_at": "2026-11-18T16:01:22.558071+00:00"
+    },
+    "NAS100_M30_2026-11-18T15:30:00+00:00_SELL": {
+      "symbol": "NAS100",
+      "timeframe": "M30",
+      "side": "SELL",
+      "entry": 27059.065,
+      "sl": 27249.361346291746,
+      "tp1": 26759.332,
+      "signal_candle_time": "2026-11-18T15:30:00+00:00",
+      "signal_candle_end_ms": 1795017600000,
+      "delivered_to": [
+        "1906447505",
+        "8678763398"
+      ],
+      "notified_to": [],
+      "status": "OPEN",
+      "diagnostics": {
+        "score": 80,
+        "adx": 19.671768171890015,
+        "plus_di": 10.984618292274927,
+        "minus_di": 33.078803176074466,
+        "rsi": 39.652350780427014,
+        "atr": 126.86423086116517,
+        "atr_risk_ratio": 1.4999999999999931,
+        "ema20": 27183.460427212238,
+        "ema50": 27188.824765361573,
+        "ema200": 27456.963241933474,
+        "supertrend": -1,
+        "h1_direction": -1,
+        "h4_direction": -1,
+        "structure_buy": 1,
+        "structure_sell": 0
+      },
+      "created_at": "2026-11-18T16:01:23.151015+00:00"
+    },
+    "BRENT_H1_2026-11-18T15:00:00+00:00_SELL": {
+      "symbol": "BRENT",
+      "timeframe": "H1",
+      "side": "SELL",
+      "entry": 91.956,
+      "sl": 92.93904770834705,
+      "tp1": 89.1705,
+      "signal_candle_time": "2026-11-18T15:00:00+00:00",
+      "signal_candle_end_ms": 1795017600000,
+      "delivered_to": [
+        "1906447505",
+        "8678763398"
+      ],
+      "notified_to": [],
+      "status": "OPEN",
+      "diagnostics": {
+        "score": 80,
+        "adx": 21.64620720098072,
+        "plus_di": 17.85661953604111,
+        "minus_di": 25.49737971802239,
+        "rsi": 41.4917931071384,
+        "atr": 0.6553651388980277,
+        "atr_risk_ratio": 1.500000000000004,
+        "ema20": 92.43705376385564,
+        "ema50": 92.92464930395757,
+        "ema200": 94.75982882498836,
+        "supertrend": 1,
+        "h1_direction": -1,
+        "h4_direction": -1,
+        "structure_buy": 0,
+        "structure_sell": 2
+      },
+      "created_at": "2026-11-18T16:01:23.780061+00:00"
     }
   }
 }
