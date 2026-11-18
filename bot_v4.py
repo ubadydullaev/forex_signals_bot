@@ -1962,7 +1962,9 @@ def main():
         h4 = cache.get(
             (symbol, "H4")
         )
-
+        d1 = cache.get(
+            (symbol, "D1")
+        )
         if not h1 or not h4:
 
             logging.warning(
