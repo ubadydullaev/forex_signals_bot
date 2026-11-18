@@ -59,7 +59,7 @@ def register_tracked_signal(state, signal, record):
         "delivered_to": delivered,
         "notified_to": [],
         "status": "OPEN",
-                "diagnostics": {
+        "diagnostics": {
             name: signal[name]
             for name in (
                 "score", "adx", "plus_di", "minus_di",
