@@ -181,7 +181,7 @@
       ]
     },
     "BRENT_H1": {
-      "signature": "2026-11-18T20:00:00+00:00_SELL",
+      "signature": "2026-11-18T21:00:00+00:00_SELL",
       "target_users": [
         "1867555949",
         "1906447505",
@@ -2022,6 +2022,41 @@
         "structure_sell": 0
       },
       "created_at": "2026-11-18T21:31:37.875066+00:00"
+    },
+    "BRENT_H1_2026-11-18T21:00:00+00:00_SELL": {
+      "symbol": "BRENT",
+      "timeframe": "H1",
+      "side": "SELL",
+      "entry": 91.387,
+      "sl": 92.22019420148969,
+      "tp1": 89.146,
+      "signal_candle_time": "2026-11-18T21:00:00+00:00",
+      "signal_candle_end_ms": 1795039200000,
+      "delivered_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "notified_to": [],
+      "status": "OPEN",
+      "diagnostics": {
+        "score": 90,
+        "adx": 23.41465889572134,
+        "plus_di": 18.752360262885773,
+        "minus_di": 28.36425312916222,
+        "rsi": 40.778884688399465,
+        "atr": 0.6679613432646117,
+        "atr_risk_ratio": 1.2473688932618683,
+        "ema20": 91.95375332239817,
+        "ema50": 92.58778857497555,
+        "ema200": 94.5603865987825,
+        "supertrend": -1,
+        "h1_direction": -1,
+        "h4_direction": -1,
+        "structure_buy": 0,
+        "structure_sell": 1
+      },
+      "created_at": "2026-11-18T22:01:46.277882+00:00"
     }
   }
 }
