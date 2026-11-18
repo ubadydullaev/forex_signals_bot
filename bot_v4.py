@@ -1094,9 +1094,10 @@ def filter_levels(
 
 def price_digits(symbol):
 
-    if symbol in ("US500", "NAS100", "DE30"):
+    if symbol in ("US500", "DE30"):
         return 1
-
+    if symbol == "BTCUSD":
+        return 2
     if symbol == "XAUUSD":
         return 2
 
