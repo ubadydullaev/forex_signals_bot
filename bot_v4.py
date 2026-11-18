@@ -2023,7 +2023,8 @@ def main():
 
         # Har bir signalning yetkazish holati alohida saqlanadi.
         state["signals"][key] = record
-
+        if register_tracked_signal(state, signal, record):
+            state_changed = True
         state_changed = True
 
         if delivered_now:
