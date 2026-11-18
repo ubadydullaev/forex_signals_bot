@@ -181,7 +181,7 @@
       ]
     },
     "BRENT_H1": {
-      "signature": "2026-11-18T19:00:00+00:00_SELL",
+      "signature": "2026-11-18T20:00:00+00:00_SELL",
       "target_users": [
         "1867555949",
         "1906447505",
@@ -268,7 +268,7 @@
       ]
     },
     "BRENT_M30": {
-      "signature": "2026-11-18T20:00:00+00:00_SELL",
+      "signature": "2026-11-18T20:30:00+00:00_SELL",
       "target_users": [
         "1867555949",
         "1906447505",
@@ -1917,6 +1917,76 @@
         "structure_sell": 1
       },
       "created_at": "2026-11-18T20:46:35.017807+00:00"
+    },
+    "BRENT_M30_2026-11-18T20:30:00+00:00_SELL": {
+      "symbol": "BRENT",
+      "timeframe": "M30",
+      "side": "SELL",
+      "entry": 91.51,
+      "sl": 92.17948690998146,
+      "tp1": 90.314,
+      "signal_candle_time": "2026-11-18T20:30:00+00:00",
+      "signal_candle_end_ms": 1795035600000,
+      "delivered_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "notified_to": [],
+      "status": "OPEN",
+      "diagnostics": {
+        "score": 90,
+        "adx": 23.710623998000283,
+        "plus_di": 16.97426006502314,
+        "minus_di": 25.358479866807127,
+        "rsi": 43.87517037358162,
+        "atr": 0.5299127332097917,
+        "atr_risk_ratio": 1.2633908717879578,
+        "ema20": 91.82106710828238,
+        "ema50": 92.19795480217509,
+        "ema200": 93.06826297131356,
+        "supertrend": -1,
+        "h1_direction": -1,
+        "h4_direction": -1,
+        "structure_buy": 1,
+        "structure_sell": 1
+      },
+      "created_at": "2026-11-18T21:01:41.994569+00:00"
+    },
+    "BRENT_H1_2026-11-18T20:00:00+00:00_SELL": {
+      "symbol": "BRENT",
+      "timeframe": "H1",
+      "side": "SELL",
+      "entry": 91.51,
+      "sl": 92.53939909296591,
+      "tp1": 89.146,
+      "signal_candle_time": "2026-11-18T20:00:00+00:00",
+      "signal_candle_end_ms": 1795035600000,
+      "delivered_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "notified_to": [],
+      "status": "OPEN",
+      "diagnostics": {
+        "score": 90,
+        "adx": 23.646538798083416,
+        "plus_di": 19.656193939490887,
+        "minus_di": 28.464755621531143,
+        "rsi": 42.00239015254425,
+        "atr": 0.6862660619772736,
+        "atr_risk_ratio": 1.4999999999999896,
+        "ema20": 92.01341156686115,
+        "ema50": 92.63680035354598,
+        "ema200": 94.59227993143357,
+        "supertrend": -1,
+        "h1_direction": -1,
+        "h4_direction": -1,
+        "structure_buy": 0,
+        "structure_sell": 1
+      },
+      "created_at": "2026-11-18T21:01:42.957848+00:00"
     }
   }
 }
