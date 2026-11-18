@@ -8,6 +8,7 @@ import subprocess
 from datetime import datetime, timedelta, timezone
 
 import requests
+from btc_data import get_btc_candles
 from signal_tracker import (
     register_tracked_signal,
     evaluate_tracked_signals,
@@ -38,7 +39,7 @@ SYMBOLS = [
     "USDCAD",
     "USDCHF",
     "US500",
-    "NAS100",
+    "BTCUSD",
     "DE30",
     "XAGUSD",
     "BRENT",
@@ -53,7 +54,6 @@ DUKASCOPY_SYMBOLS = {
     "USDCAD": "usdcad",
     "USDCHF": "usdchf",
     "US500": "usa500idxusd",
-    "NAS100": "usatechidxusd",
     "DE30": "deuidxeur",
     "XAGUSD": "xagusd",
     "BRENT": "brentcmdusd",
@@ -126,7 +126,8 @@ def time_key(value):
 # =========================================================
 
 def get_candles(symbol, interval):
-
+    if symbol == "BTCUSD":
+        return get_btc_candles(interval)
     timeframe_map = {
         "15m": ("m15", 7, 15 * 60 * 1000),
         "30m": ("m30", 10, 30 * 60 * 1000),
