@@ -38,7 +38,7 @@
       ]
     },
     "EURUSD_M15": {
-      "signature": "2026-11-18T14:15:00+00:00_SELL",
+      "signature": "2026-11-18T15:15:00+00:00_SELL",
       "target_users": [
         "1906447505",
         "8678763398"
@@ -85,7 +85,7 @@
       ]
     },
     "US500_M15": {
-      "signature": "2026-11-18T15:00:00+00:00_SELL",
+      "signature": "2026-11-18T15:15:00+00:00_SELL",
       "target_users": [
         "1906447505",
         "8678763398"
@@ -195,7 +195,7 @@
       ]
     },
     "BRENT_M15": {
-      "signature": "2026-11-18T09:45:00+00:00_SELL",
+      "signature": "2026-11-18T15:15:00+00:00_SELL",
       "target_users": [
         "1906447505",
         "8678763398"
@@ -217,7 +217,7 @@
       ]
     },
     "NAS100_M15": {
-      "signature": "2026-11-18T15:00:00+00:00_SELL",
+      "signature": "2026-11-18T15:15:00+00:00_SELL",
       "target_users": [
         "1906447505",
         "8678763398"
@@ -410,6 +410,74 @@
       "notified_to": [],
       "status": "OPEN",
       "created_at": "2026-11-18T15:21:16.751126+00:00"
+    },
+    "NAS100_M15_2026-11-18T15:15:00+00:00_SELL": {
+      "symbol": "NAS100",
+      "timeframe": "M15",
+      "side": "SELL",
+      "entry": 27119.642,
+      "sl": 27278.116104817484,
+      "tp1": 26853.492,
+      "signal_candle_time": "2026-11-18T15:15:00+00:00",
+      "signal_candle_end_ms": 1795015800000,
+      "delivered_to": [
+        "1906447505",
+        "8678763398"
+      ],
+      "notified_to": [],
+      "status": "OPEN",
+      "created_at": "2026-11-18T15:31:24.902886+00:00"
+    },
+    "US500_M15_2026-11-18T15:15:00+00:00_SELL": {
+      "symbol": "US500",
+      "timeframe": "M15",
+      "side": "SELL",
+      "entry": 7336.246,
+      "sl": 7364.108885888938,
+      "tp1": 7288.173,
+      "signal_candle_time": "2026-11-18T15:15:00+00:00",
+      "signal_candle_end_ms": 1795015800000,
+      "delivered_to": [
+        "1906447505",
+        "8678763398"
+      ],
+      "notified_to": [],
+      "status": "OPEN",
+      "created_at": "2026-11-18T15:31:25.496513+00:00"
+    },
+    "EURUSD_M15_2026-11-18T15:15:00+00:00_SELL": {
+      "symbol": "EURUSD",
+      "timeframe": "M15",
+      "side": "SELL",
+      "entry": 1.09678,
+      "sl": 1.097555919812202,
+      "tp1": 1.09531,
+      "signal_candle_time": "2026-11-18T15:15:00+00:00",
+      "signal_candle_end_ms": 1795015800000,
+      "delivered_to": [
+        "1906447505",
+        "8678763398"
+      ],
+      "notified_to": [],
+      "status": "OPEN",
+      "created_at": "2026-11-18T15:31:26.111244+00:00"
+    },
+    "BRENT_M15_2026-11-18T15:15:00+00:00_SELL": {
+      "symbol": "BRENT",
+      "timeframe": "M15",
+      "side": "SELL",
+      "entry": 92.175,
+      "sl": 92.86845557634281,
+      "tp1": 91.0,
+      "signal_candle_time": "2026-11-18T15:15:00+00:00",
+      "signal_candle_end_ms": 1795015800000,
+      "delivered_to": [
+        "1906447505",
+        "8678763398"
+      ],
+      "notified_to": [],
+      "status": "OPEN",
+      "created_at": "2026-11-18T15:31:26.705409+00:00"
     }
   }
 }
