@@ -1,1 +1,49 @@
 
+name: Advanced Strategy Backtest
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Dukascopy
+        run: npm install dukascopy-node
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Check backtest syntax
+        run: python -m py_compile advanced_analysis.py advanced_backtest.py btc_data.py
+
+      - name: Run historical backtest
+        run: python advanced_backtest.py
+
+      - name: Upload trade report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: advanced-backtest-trades
+          path: backtest_results/advanced_trades.csv
+          if-no-files-found: warn
+          retention-days: 14
+          
