@@ -1986,8 +1986,6 @@ def main():
             try:
                             try:
 
-                try:
-
                     advanced = run_advanced_analysis(
                         tf,
                         candles,
