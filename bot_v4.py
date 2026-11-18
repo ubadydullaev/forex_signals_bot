@@ -1912,7 +1912,7 @@ def main():
                     len(cache[(symbol, tf)])
                 )
 
-            except Exception as exc:
+                        except Exception as exc:
 
                 logging.warning(
                     "%s %s ma'lumot olinmadi: %s",
@@ -1920,7 +1920,8 @@ def main():
                     tf,
                     exc
                 )
-                        try:
+
+        try:
 
             cache[(symbol, "D1")] = get_candles(
                 symbol,
@@ -1940,6 +1941,8 @@ def main():
                 symbol,
                 exc
             )
+
+    tracking_changed = evaluate_tracked_signals(
     tracking_changed = evaluate_tracked_signals(
         state,
         cache,
