@@ -182,8 +182,10 @@ def run_one_backtest(symbol, tf, histories):
     first = max(MIN_HISTORY, len(candles) - MAX_TEST_BARS - 1)
     last = len(candles) - 1
 
-    next_free_index = first
+        next_free_index = first
     for i in range(first, last):
+        if i <= next_free_index and i != first:
+            continue
         if i < next_free_index:
             continue
         signal_candle = candles[i]
