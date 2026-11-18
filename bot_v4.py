@@ -1,4 +1,3 @@
-
 import os
 import json
 import time
@@ -35,7 +34,27 @@ SYMBOLS = [
     "AUDUSD",
     "USDCAD",
     "USDCHF",
+    "US500",
+    "NAS100",
+    "DE30",
+    "XAGUSD",
+    "BRENT",
 ]
+
+DUKASCOPY_SYMBOLS = {
+    "XAUUSD": "xauusd",
+    "EURUSD": "eurusd",
+    "GBPUSD": "gbpusd",
+    "USDJPY": "usdjpy",
+    "AUDUSD": "audusd",
+    "USDCAD": "usdcad",
+    "USDCHF": "usdchf",
+    "US500": "usa500idxusd",
+    "NAS100": "usatechidxusd",
+    "DE30": "deuidxeur",
+    "XAGUSD": "xagusd",
+    "BRENT": "brentcmdusd",
+}
 
 TIMEFRAMES = {
     "M15": "15m",
@@ -71,7 +90,7 @@ logging.basicConfig(
 session = requests.Session()
 
 session.headers.update({
-    "User-Agent": "ForexSignalsBot/4.3"
+    "User-Agent": "ForexSignalsBot/4.4"
 })
 
 
@@ -121,6 +140,13 @@ def get_candles(symbol, interval):
         timeframe_map[interval]
     )
 
+    dukascopy_symbol = DUKASCOPY_SYMBOLS.get(symbol)
+
+    if not dukascopy_symbol:
+        raise ValueError(
+            f"Dukascopy kodi topilmadi: {symbol}"
+        )
+
     now = datetime.now(timezone.utc)
 
     from_date = (
@@ -134,7 +160,7 @@ def get_candles(symbol, interval):
     os.makedirs(output_dir, exist_ok=True)
 
     file_name = (
-        f"{symbol.lower()}_{dukascopy_tf}_"
+        f"{dukascopy_symbol}_{dukascopy_tf}_"
         f"{now.strftime('%Y%m%d%H%M')}"
     )
 
@@ -148,7 +174,7 @@ def get_candles(symbol, interval):
         "--no-install",
         "dukascopy-node",
         "-i",
-        symbol.lower(),
+        dukascopy_symbol,
         "-from",
         from_date,
         "-to",
@@ -1064,11 +1090,20 @@ def filter_levels(
 
 def price_digits(symbol):
 
-    if symbol.endswith("JPY"):
-        return 3
+    if symbol in ("US500", "NAS100", "DE30"):
+        return 1
 
     if symbol == "XAUUSD":
         return 2
+
+    if symbol == "XAGUSD":
+        return 3
+
+    if symbol == "BRENT":
+        return 2
+
+    if symbol.endswith("JPY"):
+        return 3
 
     return 5
 
@@ -1437,13 +1472,20 @@ def analyze(symbol, timeframe, candles, h1, h4):
         entry
     )
 
-    if usd_factor is None:
-        return None
-
-    risk_usd = risk * usd_factor
+    # Indeks va tovarlar uchun broker kontrakt qiymati
+    # tasdiqlanmaguncha dollar hisobini ko'rsatmaymiz.
+    risk_usd = (
+        risk * usd_factor
+        if usd_factor is not None
+        else None
+    )
 
     rewards_usd = [
-        abs(tp - entry) * usd_factor
+        (
+            abs(tp - entry) * usd_factor
+            if usd_factor is not None
+            else None
+        )
         for tp in final_tps
     ]
 
@@ -1565,19 +1607,33 @@ def format_signal(signal):
         reward = signal["rewards_usd"][i]
         rr = signal["reward_risks"][i]
 
+        reward_text = (
+            f"~${reward:.2f} | "
+            if reward is not None
+            else ""
+        )
+
         lines.append(
             f"✅ TP{i + 1}: "
             f"<code>{fmt(tp)}</code> "
-            f"(~${reward:.2f} | {rr:.2f}R)"
+            f"({reward_text}{rr:.2f}R)"
         )
+
+    risk_line = (
+        "⚠️ 0.01 lot uchun taxminiy "
+        f"SL riski: <b>${signal['risk_usd']:.2f}</b>"
+        if signal["risk_usd"] is not None
+        else (
+            "📏 SL masofasi: "
+            f"<b>{signal['risk']:.{digits}f}</b> "
+            "narx birligi"
+        )
+    )
 
     lines.extend([
         "━━━━━━━━━━━━━━",
 
-        (
-            "⚠️ 0.01 lot uchun taxminiy "
-            f"SL riski: <b>${signal['risk_usd']:.2f}</b>"
-        ),
+        risk_line,
 
         (
             "📊 Confluence score: "
@@ -1599,9 +1655,9 @@ def format_signal(signal):
         "🕯 Yopilgan sham asosida",
 
         (
-            "⚠️ Dollar hisob-kitobi taxminiy: "
-            "broker kontrakt hajmi, spread, "
-            "komissiya va slippage farq qilishi mumkin."
+            "⚠️ Dollar riski faqat qo'llab-quvvatlangan "
+            "instrumentlar uchun taxminiy hisoblanadi. "
+            "Indeks va tovarlarda R nisbati ko'rsatiladi."
         ),
 
         (
@@ -1684,7 +1740,7 @@ def save_state(state, sha):
     ).encode("utf-8")
 
     payload = {
-        "message": "Update Forex V4.3 signal state",
+        "message": "Update Forex V4.4 signal state",
 
         "content": base64.b64encode(
             raw
@@ -1774,7 +1830,7 @@ def get_delivery_record(state, key, signature, users):
 def main():
 
     logging.info(
-        "Forex V4.3 ishga tushdi"
+        "Forex V4.4 ishga tushdi"
     )
 
     # State yuklanmasa, bot davom etmaydi.
@@ -1983,7 +2039,7 @@ def main():
             )
 
     # -----------------------------------------------------
-    # State saqlash
+    # STATE SAVE
     # -----------------------------------------------------
 
     if state_changed:
@@ -1994,11 +2050,11 @@ def main():
         )
 
         logging.info(
-            "V4.3 state GitHub'ga saqlandi"
+            "V4.4 state GitHub'ga saqlandi"
         )
 
     logging.info(
-        "V4.3 yakunlandi. Yangi yuborilgan signallar: %s",
+        "V4.4 yakunlandi. Yangi yuborilgan signallar: %s",
         sent
     )
 
