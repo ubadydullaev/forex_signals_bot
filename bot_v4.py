@@ -321,7 +321,23 @@ def get_candles(symbol, interval):
         )
 
     return candles[-CANDLE_LIMIT:]
+# =========================================================
+# ADVANCED ANALYSIS DATA
+# =========================================================
 
+def run_advanced_analysis(candles, h1, h4):
+
+    entry_df = pd.DataFrame(candles)
+    h1_df = pd.DataFrame(h1)
+    h4_df = pd.DataFrame(h4)
+
+    return analyze_advanced(
+        entry_df=entry_df,
+        higher_timeframes={
+            "H1": h1_df,
+            "H4": h4_df,
+        }
+    )
 
 # =========================================================
 # INDICATORS
