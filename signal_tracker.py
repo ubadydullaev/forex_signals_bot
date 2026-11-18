@@ -97,10 +97,10 @@ def format_result(item):
     symbol = item["symbol"]
 
     digits = (
-        1 if symbol in ("US500", "NAS100", "DE30")
-        else 2 if symbol in ("XAUUSD", "BRENT")
-        else 3 if symbol == "XAGUSD" or symbol.endswith("JPY")
-        else 5
+        1 if symbol in ("US500", "DE30")
+else 2 if symbol in ("XAUUSD", "BRENT", "BTCUSD")
+else 3 if symbol == "XAGUSD" or symbol.endswith("JPY")
+else 5
     )
 
     status = item["status"]
