@@ -1920,6 +1920,26 @@ def main():
                     tf,
                     exc
                 )
+                        try:
+
+            cache[(symbol, "D1")] = get_candles(
+                symbol,
+                "1d"
+            )
+
+            logging.info(
+                "%s D1: %s candles",
+                symbol,
+                len(cache[(symbol, "D1")])
+            )
+
+        except Exception as exc:
+
+            logging.warning(
+                "%s D1 ma'lumot olinmadi: %s",
+                symbol,
+                exc
+            )
     tracking_changed = evaluate_tracked_signals(
         state,
         cache,
