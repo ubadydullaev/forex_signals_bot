@@ -8,6 +8,8 @@ import subprocess
 from datetime import datetime, timedelta, timezone
 
 import requests
+import pandas as pd
+from advanced_analysis import analyze_advanced
 from btc_data import get_btc_candles
 from signal_tracker import (
     register_tracked_signal,
