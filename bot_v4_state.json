@@ -294,7 +294,7 @@
       ]
     },
     "XAGUSD_M15": {
-      "signature": "2026-11-18T18:45:00+00:00_SELL",
+      "signature": "2026-11-18T22:45:00+00:00_SELL",
       "target_users": [
         "1867555949",
         "1906447505",
@@ -1652,8 +1652,12 @@
         "1906447505",
         "8678763398"
       ],
-      "notified_to": [],
-      "status": "OPEN",
+      "notified_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "status": "TP1_HIT",
       "diagnostics": {
         "score": 80,
         "adx": 32.52193502119187,
@@ -1671,7 +1675,8 @@
         "structure_buy": 0,
         "structure_sell": 1
       },
-      "created_at": "2026-11-18T19:01:40.193552+00:00"
+      "created_at": "2026-11-18T19:01:40.193552+00:00",
+      "result_candle_time": "2026-11-18T22:45:00+00:00"
     },
     "XAGUSD_M15_2026-11-18T18:45:00+00:00_SELL": {
       "symbol": "XAGUSD",
@@ -2062,6 +2067,41 @@
         "structure_sell": 1
       },
       "created_at": "2026-11-18T22:01:46.277882+00:00"
+    },
+    "XAGUSD_M15_2026-11-18T22:45:00+00:00_SELL": {
+      "symbol": "XAGUSD",
+      "timeframe": "M15",
+      "side": "SELL",
+      "entry": 45.045,
+      "sl": 45.239728098904905,
+      "tp1": 44.741,
+      "signal_candle_time": "2026-11-18T22:45:00+00:00",
+      "signal_candle_end_ms": 1795042800000,
+      "delivered_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "notified_to": [],
+      "status": "OPEN",
+      "diagnostics": {
+        "score": 80,
+        "adx": 20.205519238742223,
+        "plus_di": 15.166831692253394,
+        "minus_di": 19.27879143009688,
+        "rsi": 45.946026297742854,
+        "atr": 0.12981873260326798,
+        "atr_risk_ratio": 1.5000000000000109,
+        "ema20": 45.0685752091562,
+        "ema50": 45.29233802157645,
+        "ema200": 46.38913116057386,
+        "supertrend": -1,
+        "h1_direction": -1,
+        "h4_direction": -1,
+        "structure_buy": 0,
+        "structure_sell": 0
+      },
+      "created_at": "2026-11-18T23:01:56.382857+00:00"
     }
   }
 }
