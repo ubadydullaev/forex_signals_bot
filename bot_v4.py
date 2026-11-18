@@ -1984,6 +1984,8 @@ def main():
                 continue
 
             try:
+                            try:
+
                 try:
 
                     advanced = run_advanced_analysis(
@@ -2013,7 +2015,15 @@ def main():
                         "%s %s advanced tahlil xatosi",
                         symbol,
                         tf
-    )
+                    )
+
+                signal = analyze(
+                    symbol,
+                    tf,
+                    candles,
+                    h1,
+                    h4
+                )
                 signal = analyze(
                     symbol,
                     tf,
