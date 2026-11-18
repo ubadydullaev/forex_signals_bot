@@ -184,7 +184,7 @@ def run_one_backtest(symbol, tf, histories):
 
     next_free_index = first
     for i in range(first, last):
-        if i <= next_free_index and i != first:
+        if i < next_free_index:
             continue
         signal_candle = candles[i]
         signal_close_time = signal_candle["timestamp"] + entry_ms
