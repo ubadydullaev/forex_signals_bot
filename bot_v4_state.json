@@ -13,7 +13,17 @@
     },
     "XAUUSD_M5": "2026-11-17T19:40:00Z_SELL",
     "EURUSD_M5": "2026-11-17T15:30:00Z_BUY",
-    "XAUUSD_M30": "2026-11-17T14:00:00Z_SELL",
+    "XAUUSD_M30": {
+      "signature": "2026-11-18T14:00:00+00:00_SELL",
+      "target_users": [
+        "1906447505",
+        "8678763398"
+      ],
+      "delivered_to": [
+        "1906447505",
+        "8678763398"
+      ]
+    },
     "XAUUSD_H1": "2026-11-17T17:00:00Z_SELL",
     "XAUUSD_H4": "2026-11-17T12:00:00Z_SELL",
     "XAUUSD_M15": {
@@ -28,7 +38,7 @@
       ]
     },
     "EURUSD_M15": {
-      "signature": "2026-11-18T06:15:00+00:00_SELL",
+      "signature": "2026-11-18T14:15:00+00:00_SELL",
       "target_users": [
         "1906447505",
         "8678763398"
@@ -39,7 +49,7 @@
       ]
     },
     "EURUSD_M30": {
-      "signature": "2026-11-18T05:00:00+00:00_SELL",
+      "signature": "2026-11-18T14:00:00+00:00_SELL",
       "target_users": [
         "1906447505",
         "8678763398"
@@ -75,7 +85,7 @@
       ]
     },
     "US500_M15": {
-      "signature": "2026-11-18T13:15:00+00:00_SELL",
+      "signature": "2026-11-18T14:15:00+00:00_SELL",
       "target_users": [
         "1906447505",
         "8678763398"
@@ -174,7 +184,7 @@
       ]
     },
     "US500_H1": {
-      "signature": "2026-11-18T12:00:00+00:00_SELL",
+      "signature": "2026-11-18T13:00:00+00:00_SELL",
       "target_users": [
         "1906447505",
         "8678763398"
@@ -205,6 +215,93 @@
         "1906447505",
         "8678763398"
       ]
+    }
+  },
+  "tracked_signals": {
+    "US500_M15_2026-11-18T14:15:00+00:00_SELL": {
+      "symbol": "US500",
+      "timeframe": "M15",
+      "side": "SELL",
+      "entry": 7350.756,
+      "sl": 7367.112980893857,
+      "tp1": 7300.219,
+      "signal_candle_time": "2026-11-18T14:15:00+00:00",
+      "signal_candle_end_ms": 1795012200000,
+      "delivered_to": [
+        "1906447505",
+        "8678763398"
+      ],
+      "notified_to": [],
+      "status": "OPEN",
+      "created_at": "2026-11-18T14:33:53.995805+00:00"
+    },
+    "XAUUSD_M30_2026-11-18T14:00:00+00:00_SELL": {
+      "symbol": "XAUUSD",
+      "timeframe": "M30",
+      "side": "SELL",
+      "entry": 3778.755,
+      "sl": 3799.50806761066,
+      "tp1": 3742.55,
+      "signal_candle_time": "2026-11-18T14:00:00+00:00",
+      "signal_candle_end_ms": 1795012200000,
+      "delivered_to": [
+        "1906447505",
+        "8678763398"
+      ],
+      "notified_to": [],
+      "status": "OPEN",
+      "created_at": "2026-11-18T14:33:54.577484+00:00"
+    },
+    "EURUSD_M15_2026-11-18T14:15:00+00:00_SELL": {
+      "symbol": "EURUSD",
+      "timeframe": "M15",
+      "side": "SELL",
+      "entry": 1.09685,
+      "sl": 1.097825728843722,
+      "tp1": 1.09531,
+      "signal_candle_time": "2026-11-18T14:15:00+00:00",
+      "signal_candle_end_ms": 1795012200000,
+      "delivered_to": [
+        "1906447505",
+        "8678763398"
+      ],
+      "notified_to": [],
+      "status": "OPEN",
+      "created_at": "2026-11-18T14:33:55.142465+00:00"
+    },
+    "EURUSD_M30_2026-11-18T14:00:00+00:00_SELL": {
+      "symbol": "EURUSD",
+      "timeframe": "M30",
+      "side": "SELL",
+      "entry": 1.09685,
+      "sl": 1.097853918942331,
+      "tp1": 1.09531,
+      "signal_candle_time": "2026-11-18T14:00:00+00:00",
+      "signal_candle_end_ms": 1795012200000,
+      "delivered_to": [
+        "1906447505",
+        "8678763398"
+      ],
+      "notified_to": [],
+      "status": "OPEN",
+      "created_at": "2026-11-18T14:33:55.729539+00:00"
+    },
+    "US500_H1_2026-11-18T13:00:00+00:00_SELL": {
+      "symbol": "US500",
+      "timeframe": "H1",
+      "side": "SELL",
+      "entry": 7366.645,
+      "sl": 7404.029513547996,
+      "tp1": 7296.968,
+      "signal_candle_time": "2026-11-18T13:00:00+00:00",
+      "signal_candle_end_ms": 1795010400000,
+      "delivered_to": [
+        "1906447505",
+        "8678763398"
+      ],
+      "notified_to": [],
+      "status": "OPEN",
+      "created_at": "2026-11-18T14:33:56.307830+00:00"
     }
   }
 }
