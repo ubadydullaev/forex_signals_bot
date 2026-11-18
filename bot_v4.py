@@ -1912,7 +1912,7 @@ def main():
                     len(cache[(symbol, tf)])
                 )
 
-           except Exception as exc:
+            except Exception as exc:
 
                 logging.warning(
                     "%s %s ma'lumot olinmadi: %s",
@@ -1934,7 +1934,7 @@ def main():
                 len(cache[(symbol, "D1")])
             )
 
-        except Exception as exc:
+       except Exception as exc:
 
             logging.warning(
                 "%s D1 ma'lumot olinmadi: %s",
