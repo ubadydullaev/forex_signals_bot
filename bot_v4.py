@@ -8,7 +8,10 @@ import subprocess
 from datetime import datetime, timedelta, timezone
 
 import requests
-
+from signal_tracker import (
+    register_tracked_signal,
+    evaluate_tracked_signals,
+)
 
 # =========================================================
 # CONFIG
@@ -1141,7 +1144,11 @@ def usd_value_per_price_unit(symbol, entry):
         return 1000.0 / entry
 
     return None
-
+tracking_changed = evaluate_tracked_signals(
+    state,
+    cache,
+    send_telegram
+)
 
 # =========================================================
 # SIGNAL ANALYSIS
