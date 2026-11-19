@@ -350,114 +350,7 @@ def fetch_dukascopy_history(symbol, interval, days):
 # =========================================================
 
 
-def fetch_btc_history(interval, days):
-    timeframe = interval.upper()
 
-    if timeframe not in DURATION_MS:
-        raise ValueError(
-            f"BTC timeframe noto'g'ri: {interval}"
-        )
-
-    duration = DURATION_MS[timeframe]
-
-    now_ms = int(
-        datetime.now(timezone.utc).timestamp() * 1000
-    )
-
-    start_ms = (
-        now_ms - days * 24 * 60 * 60 * 1000
-    )
-
-    cursor = start_ms
-    candles_by_time = {}
-
-    url = "https://data-api.binance.vision/api/v3/klines"
-
-    logging.info(
-        "BTCUSD %s: Binance tarixiy ma'lumotlari yuklanmoqda",
-        timeframe
-    )
-
-    while cursor < now_ms:
-        params = {
-            "symbol": "BTCUSDT",
-            "interval": interval.lower(),
-            "startTime": cursor,
-            "endTime": now_ms,
-            "limit": 1000,
-        }
-
-        response = requests.get(
-            url,
-            params=params,
-            timeout=30
-        )
-
-        response.raise_for_status()
-
-        raw_data = response.json()
-
-        if not isinstance(raw_data, list) or not raw_data:
-            break
-
-        last_timestamp = None
-
-        for item in raw_data:
-            try:
-                timestamp = int(item[0])
-                close_time = int(item[6])
-
-                if close_time >= now_ms:
-                    continue
-
-                candle = validate_candle(
-                    {
-                        "open": item[1],
-                        "high": item[2],
-                        "low": item[3],
-                        "close": item[4],
-                    },
-                    timestamp
-                )
-
-                if candle:
-                    candles_by_time[timestamp] = candle
-
-                last_timestamp = timestamp
-
-            except Exception:
-                continue
-
-        if last_timestamp is None:
-            break
-
-        next_cursor = last_timestamp + duration
-
-        if next_cursor <= cursor:
-            break
-
-        cursor = next_cursor
-
-    candles = sorted(
-        candles_by_time.values(),
-
-def fetch_btc_history(interval, days):
-    timeframe_map = {
-        "15m": "M15",
-        "30m": "M30",
-        "1h": "H1",
-        "4h": "H4",
-        "1d": "D1",
-    }
-
-def fetch_btc_history(interval, days):
-    timeframe_map = {
-        "15m": "M15",
-        "30m": "M30",
-        "1h": "H1",
-        "4h": "H4",
-        "1d": "D1",
-    }
 def fetch_btc_history(interval, days):
     timeframe_map = {
         "15m": "M15",
@@ -567,6 +460,9 @@ def fetch_btc_history(interval, days):
     )
 
     return candles
+                
+
+  
 def fetch_extended_history(symbol, interval):
     if symbol == "BTCUSD":
         return fetch_btc_history(
