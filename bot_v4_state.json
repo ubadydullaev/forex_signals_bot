@@ -27,7 +27,7 @@
     "XAUUSD_H1": "2026-11-17T17:00:00Z_SELL",
     "XAUUSD_H4": "2026-11-17T12:00:00Z_SELL",
     "XAUUSD_M15": {
-      "signature": "2026-11-19T04:15:00+00:00_SELL",
+      "signature": "2026-11-19T04:30:00+00:00_SELL",
       "target_users": [
         "1867555949",
         "1906447505",
@@ -40,7 +40,7 @@
       ]
     },
     "EURUSD_M15": {
-      "signature": "2026-11-19T04:15:00+00:00_SELL",
+      "signature": "2026-11-19T04:30:00+00:00_SELL",
       "target_users": [
         "1867555949",
         "1906447505",
@@ -126,7 +126,7 @@
       ]
     },
     "USDCAD_M15": {
-      "signature": "2026-11-19T04:15:00+00:00_BUY",
+      "signature": "2026-11-19T04:30:00+00:00_BUY",
       "target_users": [
         "1867555949",
         "1906447505",
@@ -259,7 +259,7 @@
       ]
     },
     "GBPUSD_M15": {
-      "signature": "2026-11-18T23:15:00+00:00_SELL",
+      "signature": "2026-11-19T04:30:00+00:00_SELL",
       "target_users": [
         "1867555949",
         "1906447505",
@@ -2744,6 +2744,146 @@
         "structure_sell": 1
       },
       "created_at": "2026-11-19T04:31:39.422157+00:00"
+    },
+    "XAUUSD_M15_2026-11-19T04:30:00+00:00_SELL": {
+      "symbol": "XAUUSD",
+      "timeframe": "M15",
+      "side": "SELL",
+      "entry": 3724.32,
+      "sl": 3740.0008920342657,
+      "tp1": 3693.308,
+      "signal_candle_time": "2026-11-19T04:30:00+00:00",
+      "signal_candle_end_ms": 1795063500000,
+      "delivered_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "notified_to": [],
+      "status": "OPEN",
+      "diagnostics": {
+        "score": 85,
+        "adx": 32.5372715162242,
+        "plus_di": 14.940136044638324,
+        "minus_di": 30.732739154886705,
+        "rsi": 45.98912144833224,
+        "atr": 10.453928022843693,
+        "atr_risk_ratio": 1.4999999999999987,
+        "ema20": 3728.9999927414096,
+        "ema50": 3737.889004611871,
+        "ema200": 3788.037372952225,
+        "supertrend": -1,
+        "h1_direction": -1,
+        "h4_direction": -1,
+        "structure_buy": 1,
+        "structure_sell": 0
+      },
+      "created_at": "2026-11-19T04:46:42.002241+00:00"
+    },
+    "EURUSD_M15_2026-11-19T04:30:00+00:00_SELL": {
+      "symbol": "EURUSD",
+      "timeframe": "M15",
+      "side": "SELL",
+      "entry": 1.09637,
+      "sl": 1.0969632764122867,
+      "tp1": 1.09531,
+      "signal_candle_time": "2026-11-19T04:30:00+00:00",
+      "signal_candle_end_ms": 1795063500000,
+      "delivered_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "notified_to": [],
+      "status": "OPEN",
+      "diagnostics": {
+        "score": 85,
+        "adx": 23.861330354998987,
+        "plus_di": 17.662442349123523,
+        "minus_di": 25.466624721855247,
+        "rsi": 45.7796542512528,
+        "atr": 0.00039551760819106334,
+        "atr_risk_ratio": 1.5000000000002167,
+        "ema20": 1.0965249157286299,
+        "ema50": 1.0969018843833995,
+        "ema200": 1.0983789332823595,
+        "supertrend": -1,
+        "h1_direction": -1,
+        "h4_direction": -1,
+        "structure_buy": 2,
+        "structure_sell": 0
+      },
+      "created_at": "2026-11-19T04:46:42.983546+00:00"
+    },
+    "GBPUSD_M15_2026-11-19T04:30:00+00:00_SELL": {
+      "symbol": "GBPUSD",
+      "timeframe": "M15",
+      "side": "SELL",
+      "entry": 1.3133,
+      "sl": 1.314087587705962,
+      "tp1": 1.312,
+      "signal_candle_time": "2026-11-19T04:30:00+00:00",
+      "signal_candle_end_ms": 1795063500000,
+      "delivered_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "notified_to": [],
+      "status": "OPEN",
+      "diagnostics": {
+        "score": 85,
+        "adx": 26.28610667098301,
+        "plus_di": 16.771514440876686,
+        "minus_di": 27.782675201820076,
+        "rsi": 44.41103566011753,
+        "atr": 0.0005250584706413072,
+        "atr_risk_ratio": 1.5000000000000548,
+        "ema20": 1.3135631040302762,
+        "ema50": 1.3144315383477174,
+        "ema200": 1.3171383295252692,
+        "supertrend": -1,
+        "h1_direction": -1,
+        "h4_direction": -1,
+        "structure_buy": 1,
+        "structure_sell": 0
+      },
+      "created_at": "2026-11-19T04:46:43.963830+00:00"
+    },
+    "USDCAD_M15_2026-11-19T04:30:00+00:00_BUY": {
+      "symbol": "USDCAD",
+      "timeframe": "M15",
+      "side": "BUY",
+      "entry": 1.43452,
+      "sl": 1.433850470969889,
+      "tp1": 1.4357,
+      "signal_candle_time": "2026-11-19T04:30:00+00:00",
+      "signal_candle_end_ms": 1795063500000,
+      "delivered_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "notified_to": [],
+      "status": "OPEN",
+      "diagnostics": {
+        "score": 85,
+        "adx": 43.12201229564896,
+        "plus_di": 30.32829324110422,
+        "minus_di": 16.562540460754157,
+        "rsi": 56.264537275816785,
+        "atr": 0.00044635268674078486,
+        "atr_risk_ratio": 1.4999999999997873,
+        "ema20": 1.4343453101318422,
+        "ema50": 1.433485561853782,
+        "ema200": 1.4314257065992853,
+        "supertrend": 1,
+        "h1_direction": 1,
+        "h4_direction": 1,
+        "structure_buy": 0,
+        "structure_sell": 1
+      },
+      "created_at": "2026-11-19T04:46:44.961112+00:00"
     }
   }
 }
