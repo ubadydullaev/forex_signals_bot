@@ -29,7 +29,7 @@
     "XAUUSD_H1": "2026-11-17T17:00:00Z_SELL",
     "XAUUSD_H4": "2026-11-17T12:00:00Z_SELL",
     "XAUUSD_M15": {
-      "signature": "2026-11-19T04:45:00+00:00_SELL",
+      "signature": "2026-11-19T05:00:00+00:00_SELL",
       "target_users": [
         "1867555949",
         "1906447505",
@@ -300,7 +300,7 @@
       ]
     },
     "XAGUSD_M15": {
-      "signature": "2026-11-19T04:15:00+00:00_SELL",
+      "signature": "2026-11-19T05:00:00+00:00_SELL",
       "target_users": [
         "1867555949",
         "1906447505",
@@ -326,7 +326,7 @@
       ]
     },
     "AUDUSD_M15": {
-      "signature": "2026-11-19T04:45:00+00:00_SELL",
+      "signature": "2026-11-19T05:00:00+00:00_SELL",
       "target_users": [
         "1867555949",
         "1906447505",
@@ -3136,6 +3136,111 @@
         "structure_sell": 0
       },
       "created_at": "2026-11-19T05:06:23.108112+00:00"
+    },
+    "AUDUSD_M15_2026-11-19T05:00:00+00:00_SELL": {
+      "symbol": "AUDUSD",
+      "timeframe": "M15",
+      "side": "SELL",
+      "entry": 0.66814,
+      "sl": 0.6691860504002953,
+      "tp1": 0.66614,
+      "signal_candle_time": "2026-11-19T05:00:00+00:00",
+      "signal_candle_end_ms": 1795065300000,
+      "delivered_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "notified_to": [],
+      "status": "OPEN",
+      "diagnostics": {
+        "score": 85,
+        "adx": 47.348352576729425,
+        "plus_di": 14.934273050460867,
+        "minus_di": 28.078036578189515,
+        "rsi": 45.08296490858918,
+        "atr": 0.0006973669335302149,
+        "atr_risk_ratio": 1.5000000000000726,
+        "ema20": 0.6682081124155841,
+        "ema50": 0.6695708625801225,
+        "ema200": 0.6721120051547343,
+        "supertrend": -1,
+        "h1_direction": -1,
+        "h4_direction": -1,
+        "structure_buy": 1,
+        "structure_sell": 0
+      },
+      "created_at": "2026-11-19T05:16:35.413637+00:00"
+    },
+    "XAUUSD_M15_2026-11-19T05:00:00+00:00_SELL": {
+      "symbol": "XAUUSD",
+      "timeframe": "M15",
+      "side": "SELL",
+      "entry": 3729.235,
+      "sl": 3744.8339502744434,
+      "tp1": 3693.308,
+      "signal_candle_time": "2026-11-19T05:00:00+00:00",
+      "signal_candle_end_ms": 1795065300000,
+      "delivered_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "notified_to": [],
+      "status": "OPEN",
+      "diagnostics": {
+        "score": 80,
+        "adx": 31.58351291352353,
+        "plus_di": 18.027922804267533,
+        "minus_di": 26.63834836389389,
+        "rsi": 49.27305627184898,
+        "atr": 10.399300182962191,
+        "atr_risk_ratio": 1.4999999999999982,
+        "ema20": 3728.5338323045703,
+        "ema50": 3736.998935701414,
+        "ema200": 3786.813971377056,
+        "supertrend": -1,
+        "h1_direction": -1,
+        "h4_direction": -1,
+        "structure_buy": 1,
+        "structure_sell": 1
+      },
+      "created_at": "2026-11-19T05:16:36.243764+00:00"
+    },
+    "XAGUSD_M15_2026-11-19T05:00:00+00:00_SELL": {
+      "symbol": "XAGUSD",
+      "timeframe": "M15",
+      "side": "SELL",
+      "entry": 45.284,
+      "sl": 45.63340734883574,
+      "tp1": 44.741,
+      "signal_candle_time": "2026-11-19T05:00:00+00:00",
+      "signal_candle_end_ms": 1795065300000,
+      "delivered_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "notified_to": [],
+      "status": "OPEN",
+      "diagnostics": {
+        "score": 80,
+        "adx": 24.962916721538228,
+        "plus_di": 20.780034308933335,
+        "minus_di": 22.38727908496629,
+        "rsi": 51.89457837195448,
+        "atr": 0.2329382325571585,
+        "atr_risk_ratio": 1.50000000000001,
+        "ema20": 45.20651225488263,
+        "ema50": 45.28014323246615,
+        "ema200": 46.14931310808455,
+        "supertrend": -1,
+        "h1_direction": -1,
+        "h4_direction": -1,
+        "structure_buy": 1,
+        "structure_sell": 1
+      },
+      "created_at": "2026-11-19T05:16:37.192825+00:00"
     }
   }
 }
