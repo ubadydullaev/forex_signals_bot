@@ -4386,8 +4386,12 @@
         "1906447505",
         "8678763398"
       ],
-      "notified_to": [],
-      "status": "OPEN",
+      "notified_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "status": "SL_HIT",
       "diagnostics": {
         "score": 67,
         "adx": 10.244961823997397,
@@ -4405,7 +4409,8 @@
         "structure_buy": 8,
         "structure_sell": 67
       },
-      "created_at": "2026-11-19T12:01:38.882975+00:00"
+      "created_at": "2026-11-19T12:01:38.882975+00:00",
+      "result_candle_time": "2026-11-19T14:30:00+00:00"
     },
     "XAGUSD_M30_2026-11-19T11:30:00+00:00_SELL": {
       "symbol": "XAGUSD",
