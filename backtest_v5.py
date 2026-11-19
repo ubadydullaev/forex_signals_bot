@@ -450,6 +450,15 @@ def fetch_btc_history(interval, days):
         "1d": "D1",
     }
 
+def fetch_btc_history(interval, days):
+    timeframe_map = {
+        "15m": "M15",
+        "30m": "M30",
+        "1h": "H1",
+        "4h": "H4",
+        "1d": "D1",
+    }
+
     interval_key = str(interval).lower()
     timeframe = timeframe_map.get(interval_key)
 
@@ -463,14 +472,10 @@ def fetch_btc_history(interval, days):
     now_ms = int(
         datetime.now(timezone.utc).timestamp() * 1000
     )
-
-    start_ms = (
-        now_ms - days * 24 * 60 * 60 * 1000
-    )
+    start_ms = now_ms - days * 24 * 60 * 60 * 1000
 
     cursor = start_ms
     candles_by_time = {}
-
     url = "https://data-api.binance.vision/api/v3/klines"
 
     logging.info(
@@ -492,7 +497,6 @@ def fetch_btc_history(interval, days):
             params=params,
             timeout=30
         )
-
         response.raise_for_status()
         raw_data = response.json()
 
@@ -555,8 +559,6 @@ def fetch_btc_history(interval, days):
     )
 
     return candles
-
-
 
 def fetch_extended_history(symbol, interval):
     if symbol == "BTCUSD":
