@@ -14,7 +14,7 @@
     "XAUUSD_M5": "2026-11-17T19:40:00Z_SELL",
     "EURUSD_M5": "2026-11-17T15:30:00Z_BUY",
     "XAUUSD_M30": {
-      "signature": "2026-11-19T04:30:00+00:00_SELL",
+      "signature": "2026-11-19T05:00:00+00:00_SELL",
       "target_users": [
         "1867555949",
         "1906447505",
@@ -3394,6 +3394,41 @@
         "structure_sell": 1
       },
       "created_at": "2026-11-19T05:31:38.158907+00:00"
+    },
+    "XAUUSD_M30_2026-11-19T05:00:00+00:00_SELL": {
+      "symbol": "XAUUSD",
+      "timeframe": "M30",
+      "side": "SELL",
+      "entry": 3734.228,
+      "sl": 3760.4515542631743,
+      "tp1": 3693.308,
+      "signal_candle_time": "2026-11-19T05:00:00+00:00",
+      "signal_candle_end_ms": 1795066200000,
+      "delivered_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "notified_to": [],
+      "status": "OPEN",
+      "diagnostics": {
+        "score": 85,
+        "adx": 28.875146777962197,
+        "plus_di": 20.09963927171601,
+        "minus_di": 30.1954836112982,
+        "rsi": 47.962961934452785,
+        "atr": 13.517028421162154,
+        "atr_risk_ratio": 1.9400384053435054,
+        "ema20": 3733.993310313924,
+        "ema50": 3755.011047549504,
+        "ema200": 3832.2155733457557,
+        "supertrend": -1,
+        "h1_direction": -1,
+        "h4_direction": -1,
+        "structure_buy": 2,
+        "structure_sell": 0
+      },
+      "created_at": "2026-11-19T05:36:14.117206+00:00"
     }
   }
 }
