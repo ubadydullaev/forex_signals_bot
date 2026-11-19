@@ -60,27 +60,74 @@ def _higher_timeframes(timeframe, h1, h4, d1):
     return frames
 
 
+def _reject(symbol, timeframe, reason):
+    core.logging.info(
+        "[V5 REJECT] %s %s | %s",
+        symbol, timeframe, reason
+    )
+    return None
+
+
 def analyze_v5(symbol, timeframe, candles, h1, h4):
-    """Return the exact signal dictionary expected by bot_v4.format_signal()."""
+    """V5 signal analysis with detailed rejection diagnostics."""
 
     d1 = _D1_CACHE.get(symbol)
 
-    if not candles or not h1 or not h4 or not d1:
-        return None
+    if not candles:
+        return _reject(symbol, timeframe, "Entry candles missing")
 
-    if min(len(candles), len(h1), len(h4), len(d1)) < 220:
-        return None
+    if not h1:
+        return _reject(symbol, timeframe, "H1 candles missing")
+
+    if not h4:
+        return _reject(symbol, timeframe, "H4 candles missing")
+
+    if not d1:
+        return _reject(symbol, timeframe, "D1 candles missing")
+
+    lengths = {
+        "ENTRY": len(candles),
+        "H1": len(h1),
+        "H4": len(h4),
+        "D1": len(d1),
+    }
+
+    if min(lengths.values()) < 220:
+        return _reject(
+            symbol, timeframe,
+            f"Not enough candles: {lengths}"
+        )
 
     try:
         result = analyze_advanced(
             entry_df=pd.DataFrame(candles),
-            higher_timeframes=_higher_timeframes(timeframe, h1, h4, d1),
+            higher_timeframes=_higher_timeframes(
+                timeframe, h1, h4, d1
+            ),
             config=CONFIG,
         )
 
+        buy_score = int(result.get("buy_score", 0))
+        sell_score = int(result.get("sell_score", 0))
+        margin = int(result.get("score_margin", 0))
         side = result.get("signal")
+
+        htf = result.get("higher_timeframes", {})
+
+        core.logging.info(
+            "[V5 ANALYSIS] %s %s | Signal=%s | "
+            "BUY=%s SELL=%s Margin=%s | HTF=%s",
+            symbol, timeframe, side,
+            buy_score, sell_score, margin, htf
+        )
+
         if side not in ("BUY", "SELL"):
-            return None
+            reasons = result.get("reasons", {})
+            return _reject(
+                symbol, timeframe,
+                f"HOLD | BUY={buy_score} SELL={sell_score} "
+                f"Margin={margin} | Reasons={reasons}"
+            )
 
         entry = float(result["entry"])
         sl = float(result["stop_loss"])
@@ -88,39 +135,67 @@ def analyze_v5(symbol, timeframe, candles, h1, h4):
         rr = float(result["risk_reward"])
 
         values = (entry, sl, tp, rr)
-        if not all(math.isfinite(x) for x in values):
-            return None
 
-        if side == "BUY":
-            if not (sl < entry < tp):
-                return None
-        else:
-            if not (tp < entry < sl):
-                return None
+        if not all(math.isfinite(x) for x in values):
+            return _reject(
+                symbol, timeframe,
+                "Invalid or non-finite Entry/SL/TP/RR"
+            )
+
+        if side == "BUY" and not (sl < entry < tp):
+            return _reject(
+                symbol, timeframe,
+                "BUY price levels invalid"
+            )
+
+        if side == "SELL" and not (tp < entry < sl):
+            return _reject(
+                symbol, timeframe,
+                "SELL price levels invalid"
+            )
 
         risk = abs(entry - sl)
         reward = abs(tp - entry)
+        actual_rr = reward / risk if risk > 0 else 0
 
-        if risk <= 0 or reward / risk < 2.0 or rr < 2.0:
-            return None
+        if risk <= 0:
+            return _reject(
+                symbol, timeframe, "Risk is zero or negative"
+            )
 
-        # Require the relevant higher-timeframe directions to agree.
-        htf = result.get("higher_timeframes", {})
+        if actual_rr < 2.0 or rr < 2.0:
+            return _reject(
+                symbol, timeframe,
+                f"RR below 1:2 | Actual={actual_rr:.2f} "
+                f"Calculated={rr:.2f}"
+            )
+
         required_by_tf = {
             "M15": ("H1", "H4", "D1"),
             "M30": ("H1", "H4", "D1"),
             "H1": ("H4", "D1"),
             "H4": ("D1",),
         }
-        required = required_by_tf.get(timeframe, ("H1", "H4", "D1"))
+
+        required = required_by_tf.get(
+            timeframe, ("H1", "H4", "D1")
+        )
+
         expected = 1 if side == "BUY" else -1
 
         for name in required:
             item = htf.get(name, {})
-            if item.get("direction") != expected:
-                return None
+            direction = item.get("direction")
+
+            if direction != expected:
+                return _reject(
+                    symbol, timeframe,
+                    f"HTF mismatch: {name} direction={direction}, "
+                    f"required={expected}"
+                )
 
         market = result.get("market", {})
+
         atr = float(market.get("atr") or 0)
         rsi = float(market.get("rsi") or 50)
         adx = float(market.get("adx") or 0)
@@ -128,19 +203,29 @@ def analyze_v5(symbol, timeframe, candles, h1, h4):
         minus_di = float(market.get("minus_di") or 0)
 
         if atr <= 0:
-            return None
+            return _reject(
+                symbol, timeframe, "ATR is zero or invalid"
+            )
 
-        factor = core.usd_value_per_price_unit(symbol, entry)
-        risk_usd = risk * factor if factor is not None else None
-        reward_usd = reward * factor if factor is not None else None
-
-        candle = candles[-1]
-        score = max(
-            int(result.get("buy_score", 0)),
-            int(result.get("sell_score", 0)),
+        factor = core.usd_value_per_price_unit(
+            symbol, entry
         )
 
-        return {
+        risk_usd = (
+            risk * factor
+            if factor is not None else None
+        )
+
+        reward_usd = (
+            reward * factor
+            if factor is not None else None
+        )
+
+        candle = candles[-1]
+
+        score = max(buy_score, sell_score)
+
+        signal = {
             "symbol": symbol,
             "timeframe": timeframe,
             "side": side,
@@ -152,8 +237,10 @@ def analyze_v5(symbol, timeframe, candles, h1, h4):
             "tps": [tp],
             "risk_usd": risk_usd,
             "rewards_usd": [reward_usd],
-            "reward_risks": [reward / risk],
-            "candle_time": candle.get("time", candle.get("timestamp")),
+            "reward_risks": [actual_rr],
+            "candle_time": candle.get(
+                "time", candle.get("timestamp")
+            ),
             "adx": adx,
             "plus_di": plus_di,
             "minus_di": minus_di,
@@ -166,13 +253,20 @@ def analyze_v5(symbol, timeframe, candles, h1, h4):
             "supertrend": expected,
             "h1_direction": expected,
             "h4_direction": expected,
-            "structure_buy": int(result.get("buy_score", 0)),
-            "structure_sell": int(result.get("sell_score", 0)),
+            "structure_buy": buy_score,
+            "structure_sell": sell_score,
         }
 
-    except (KeyError, TypeError, ValueError, ZeroDivisionError):
+        core.logging.info(
+            "[V5 ACCEPT] %s %s | %s | Score=%s | RR=%.2f",
+            symbol, timeframe, side, score, actual_rr
+        )
+
+        return signal
+
+    except Exception:
         core.logging.exception(
-            "%s %s V5 advanced signal rejected due to invalid data",
+            "[V5 ERROR] %s %s",
             symbol, timeframe
         )
         return None
