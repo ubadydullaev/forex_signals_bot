@@ -316,7 +316,7 @@
       ]
     },
     "XAGUSD_M15": {
-      "signature": "2026-11-19T17:30:00+00:00_SELL",
+      "signature": "2026-11-19T17:45:00+00:00_SELL",
       "target_users": [
         "1867555949",
         "1906447505",
@@ -329,7 +329,7 @@
       ]
     },
     "XAGUSD_H1": {
-      "signature": "2026-11-19T06:00:00+00:00_SELL",
+      "signature": "2026-11-19T17:00:00+00:00_SELL",
       "target_users": [
         "1867555949",
         "1906447505",
@@ -4721,6 +4721,76 @@
         "structure_sell": 60
       },
       "created_at": "2026-11-19T17:46:20.055029+00:00"
+    },
+    "XAGUSD_H1_2026-11-19T17:00:00+00:00_SELL": {
+      "symbol": "XAGUSD",
+      "timeframe": "H1",
+      "side": "SELL",
+      "entry": 44.502,
+      "sl": 45.629673418784435,
+      "tp1": 42.81048987182335,
+      "signal_candle_time": "2026-11-19T17:00:00+00:00",
+      "signal_candle_end_ms": 1795111200000,
+      "delivered_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "notified_to": [],
+      "status": "OPEN",
+      "diagnostics": {
+        "score": 65,
+        "adx": 23.953360059438037,
+        "plus_di": 11.84920000764503,
+        "minus_di": 28.09905217344357,
+        "rsi": 36.252772114028815,
+        "atr": 0.46336709392217634,
+        "atr_risk_ratio": 2.43365019565638,
+        "ema20": 45.1336125744749,
+        "ema50": 45.69138780434552,
+        "ema200": 47.880501885257345,
+        "supertrend": -1,
+        "h1_direction": 0,
+        "h4_direction": -1,
+        "structure_buy": 8,
+        "structure_sell": 65
+      },
+      "created_at": "2026-11-19T18:01:49.458519+00:00"
+    },
+    "XAGUSD_M15_2026-11-19T17:45:00+00:00_SELL": {
+      "symbol": "XAGUSD",
+      "timeframe": "M15",
+      "side": "SELL",
+      "entry": 44.502,
+      "sl": 44.93388092103776,
+      "tp1": 43.85417861844336,
+      "signal_candle_time": "2026-11-19T17:45:00+00:00",
+      "signal_candle_end_ms": 1795111200000,
+      "delivered_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "notified_to": [],
+      "status": "OPEN",
+      "diagnostics": {
+        "score": 60,
+        "adx": 23.516824984257553,
+        "plus_di": 14.749966406776329,
+        "minus_di": 27.71171851634254,
+        "rsi": 41.21481689262663,
+        "atr": 0.274404605188814,
+        "atr_risk_ratio": 1.573883647982468,
+        "ema20": 44.80036291683123,
+        "ema50": 45.00856491754598,
+        "ema200": 45.719475995124526,
+        "supertrend": -1,
+        "h1_direction": -1,
+        "h4_direction": -1,
+        "structure_buy": 0,
+        "structure_sell": 60
+      },
+      "created_at": "2026-11-19T18:01:50.505534+00:00"
     }
   }
 }
