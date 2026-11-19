@@ -2903,8 +2903,12 @@
         "1906447505",
         "8678763398"
       ],
-      "notified_to": [],
-      "status": "OPEN",
+      "notified_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "status": "SL_HIT",
       "diagnostics": {
         "score": 85,
         "adx": 23.861330354998987,
@@ -2922,7 +2926,8 @@
         "structure_buy": 2,
         "structure_sell": 0
       },
-      "created_at": "2026-11-19T04:46:42.983546+00:00"
+      "created_at": "2026-11-19T04:46:42.983546+00:00",
+      "result_candle_time": "2026-11-19T07:00:00+00:00"
     },
     "GBPUSD_M15_2026-11-19T04:30:00+00:00_SELL": {
       "symbol": "GBPUSD",
@@ -3438,8 +3443,12 @@
         "1906447505",
         "8678763398"
       ],
-      "notified_to": [],
-      "status": "OPEN",
+      "notified_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "status": "SL_HIT",
       "diagnostics": {
         "score": 85,
         "adx": 23.856808849180066,
@@ -3457,7 +3466,8 @@
         "structure_buy": 0,
         "structure_sell": 0
       },
-      "created_at": "2026-11-19T05:31:36.127269+00:00"
+      "created_at": "2026-11-19T05:31:36.127269+00:00",
+      "result_candle_time": "2026-11-19T07:00:00+00:00"
     },
     "AUDUSD_M30_2026-11-19T05:00:00+00:00_SELL": {
       "symbol": "AUDUSD",
@@ -3798,8 +3808,12 @@
         "1906447505",
         "8678763398"
       ],
-      "notified_to": [],
-      "status": "OPEN",
+      "notified_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "status": "TP1_HIT",
       "diagnostics": {
         "score": 85,
         "adx": 23.24887354424039,
@@ -3817,7 +3831,8 @@
         "structure_buy": 0,
         "structure_sell": 0
       },
-      "created_at": "2026-11-19T06:46:27.212475+00:00"
+      "created_at": "2026-11-19T06:46:27.212475+00:00",
+      "result_candle_time": "2026-11-19T07:00:00+00:00"
     },
     "XAUUSD_M30_2026-11-19T06:30:00+00:00_SELL": {
       "symbol": "XAUUSD",
