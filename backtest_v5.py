@@ -302,7 +302,7 @@ def backtest():
                     base = {
                         "symbol": symbol,
                         "timeframe": timeframe,
-                        "signal_time": signal_candle.get("time", ""),
+                        "signal_time": candles[i].get("time", ""),
                         "side": side,
                         "entry": entry,
                         "sl": sl,
