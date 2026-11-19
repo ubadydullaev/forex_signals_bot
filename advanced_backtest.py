@@ -54,10 +54,10 @@ def get_history(symbol, interval):
     if symbol == "BTCUSD":
         return get_btc_candles(interval, limit=1000)
 
-    tf_map = {
+        tf_map = {
         "15m": ("m15", 7),
-        "30m": ("m30", 10),
-        "1h": ("h1", 20),
+        "30m": ("m30", 180),
+        "1h": ("h1", 180),
         "4h": ("h4", 75),
         "1d": ("d1", 500),
     }
