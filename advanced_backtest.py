@@ -389,7 +389,7 @@ def main():
                     symbol, tf, exc,
                 )
 
-        for tf in ("M15", "M30", "H1", "H4"):
+            for tf in ("M30", "H1"):
             if tf not in histories:
                 continue
 
