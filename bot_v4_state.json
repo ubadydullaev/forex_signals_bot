@@ -42,7 +42,7 @@
       ]
     },
     "EURUSD_M15": {
-      "signature": "2026-11-19T05:15:00+00:00_SELL",
+      "signature": "2026-11-19T15:45:00+00:00_SELL",
       "target_users": [
         "1867555949",
         "1906447505",
@@ -2686,8 +2686,12 @@
         "1906447505",
         "8678763398"
       ],
-      "notified_to": [],
-      "status": "OPEN",
+      "notified_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "status": "TP1_HIT",
       "diagnostics": {
         "score": 80,
         "adx": 28.76100474052162,
@@ -2705,7 +2709,8 @@
         "structure_buy": 3,
         "structure_sell": 1
       },
-      "created_at": "2026-11-19T04:16:27.712112+00:00"
+      "created_at": "2026-11-19T04:16:27.712112+00:00",
+      "result_candle_time": "2026-11-19T15:45:00+00:00"
     },
     "XAUUSD_M15_2026-11-19T04:15:00+00:00_SELL": {
       "symbol": "XAUUSD",
@@ -4161,8 +4166,12 @@
         "1906447505",
         "8678763398"
       ],
-      "notified_to": [],
-      "status": "OPEN",
+      "notified_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "status": "TP1_HIT",
       "diagnostics": {
         "score": 85,
         "adx": 26.859118108159837,
@@ -4180,7 +4189,8 @@
         "structure_buy": 0,
         "structure_sell": 0
       },
-      "created_at": "2026-11-19T07:01:45.274328+00:00"
+      "created_at": "2026-11-19T07:01:45.274328+00:00",
+      "result_candle_time": "2026-11-19T15:00:00+00:00"
     },
     "XAUUSD_M15_2026-11-19T06:45:00+00:00_SELL": {
       "symbol": "XAUUSD",
@@ -4351,8 +4361,12 @@
         "1906447505",
         "8678763398"
       ],
-      "notified_to": [],
-      "status": "OPEN",
+      "notified_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "status": "TP1_HIT",
       "diagnostics": {
         "score": 62,
         "adx": 12.921024765527745,
@@ -4370,7 +4384,8 @@
         "structure_buy": 15,
         "structure_sell": 62
       },
-      "created_at": "2026-11-19T08:46:26.784470+00:00"
+      "created_at": "2026-11-19T08:46:26.784470+00:00",
+      "result_candle_time": "2026-11-19T15:45:00+00:00"
     },
     "XAGUSD_M15_2026-11-19T09:00:00+00:00_SELL": {
       "symbol": "XAGUSD",
@@ -4536,8 +4551,12 @@
         "1906447505",
         "8678763398"
       ],
-      "notified_to": [],
-      "status": "OPEN",
+      "notified_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "status": "TP1_HIT",
       "diagnostics": {
         "score": 60,
         "adx": 25.681235042225666,
@@ -4555,7 +4574,8 @@
         "structure_buy": 0,
         "structure_sell": 60
       },
-      "created_at": "2026-11-19T15:01:45.013370+00:00"
+      "created_at": "2026-11-19T15:01:45.013370+00:00",
+      "result_candle_time": "2026-11-19T15:00:00+00:00"
     },
     "XAGUSD_M30_2026-11-19T15:00:00+00:00_SELL": {
       "symbol": "XAGUSD",
@@ -4591,6 +4611,41 @@
         "structure_sell": 70
       },
       "created_at": "2026-11-19T15:31:48.475635+00:00"
+    },
+    "EURUSD_M15_2026-11-19T15:45:00+00:00_SELL": {
+      "symbol": "EURUSD",
+      "timeframe": "M15",
+      "side": "SELL",
+      "entry": 1.09822,
+      "sl": 1.1006431213155334,
+      "tp1": 1.0945853180266998,
+      "signal_candle_time": "2026-11-19T15:45:00+00:00",
+      "signal_candle_end_ms": 1795104000000,
+      "delivered_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "notified_to": [],
+      "status": "OPEN",
+      "diagnostics": {
+        "score": 60,
+        "adx": 25.19494461290667,
+        "plus_di": 19.514317796088953,
+        "minus_di": 29.323081063622475,
+        "rsi": 41.872671818211025,
+        "atr": 0.0006656065776662395,
+        "atr_risk_ratio": 3.6404708078899217,
+        "ema20": 1.0990928060875382,
+        "ema50": 1.0986589290030335,
+        "ema200": 1.0985144089934862,
+        "supertrend": -1,
+        "h1_direction": 0,
+        "h4_direction": 0,
+        "structure_buy": 0,
+        "structure_sell": 60
+      },
+      "created_at": "2026-11-19T16:01:44.275777+00:00"
     }
   }
 }
