@@ -458,6 +458,14 @@ def fetch_btc_history(interval, days):
         "4h": "H4",
         "1d": "D1",
     }
+def fetch_btc_history(interval, days):
+    timeframe_map = {
+        "15m": "M15",
+        "30m": "M30",
+        "1h": "H1",
+        "4h": "H4",
+        "1d": "D1",
+    }
 
     interval_key = str(interval).lower()
     timeframe = timeframe_map.get(interval_key)
@@ -559,7 +567,6 @@ def fetch_btc_history(interval, days):
     )
 
     return candles
-
 def fetch_extended_history(symbol, interval):
     if symbol == "BTCUSD":
         return fetch_btc_history(
