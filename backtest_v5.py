@@ -349,13 +349,16 @@ def fetch_dukascopy_history(symbol, interval, days):
 # EXTENDED BTC HISTORY — BINANCE
 # =========================================================
 
+
 def fetch_btc_history(interval, days):
-    if interval not in DURATION_MS:
+    timeframe = interval.upper()
+
+    if timeframe not in DURATION_MS:
         raise ValueError(
             f"BTC timeframe noto'g'ri: {interval}"
         )
 
-    duration = DURATION_MS[interval]
+    duration = DURATION_MS[timeframe]
 
     now_ms = int(
         datetime.now(timezone.utc).timestamp() * 1000
@@ -366,14 +369,13 @@ def fetch_btc_history(interval, days):
     )
 
     cursor = start_ms
-
     candles_by_time = {}
 
     url = "https://data-api.binance.vision/api/v3/klines"
 
     logging.info(
         "BTCUSD %s: Binance tarixiy ma'lumotlari yuklanmoqda",
-        interval
+        timeframe
     )
 
     while cursor < now_ms:
@@ -443,13 +445,13 @@ def fetch_btc_history(interval, days):
 
     if len(candles) < bot_v5.MIN_CANDLES:
         raise RuntimeError(
-            f"BTCUSD {interval}: "
+            f"BTCUSD {timeframe}: "
             f"shamlar yetarli emas: {len(candles)}"
         )
 
     logging.info(
         "BTCUSD %s: %s ta tarixiy sham olindi",
-        interval,
+        timeframe,
         len(candles)
     )
 
