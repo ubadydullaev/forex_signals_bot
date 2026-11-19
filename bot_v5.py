@@ -1,9 +1,9 @@
-"""
-Forex Signals Bot V5 — conservative signal gate.
 
-Place this file beside bot_v4.py and advanced_analysis.py.
-The existing bot_v4.py remains the data/Telegram/state engine.
-This wrapper replaces only the signal decision function at runtime.
+"""
+Forex Signals Bot V5.1 — improved signal filtering.
+
+Keep bot_v4.py, advanced_analysis.py, btc_data.py and
+signal_tracker.py beside this file.
 """
 
 import math
@@ -13,36 +13,59 @@ import bot_v4 as core
 from advanced_analysis import analyze_advanced, AdvancedConfig
 
 
-# Remove Brent from every instrument lookup used by the old engine.
+# ---------------------------------------------------------
+# INSTRUMENTS AND CONFIGURATION
+# ---------------------------------------------------------
+
+# Brent is disabled.
 core.SYMBOLS = [s for s in core.SYMBOLS if s != "BRENT"]
 core.DUKASCOPY_SYMBOLS.pop("BRENT", None)
 
-# Enforce a minimum 1:2 risk/reward ratio in the legacy engine too.
-core.MIN_REWARD_RISK = 2.0
-core.PREFERRED_REWARD_RISK = 2.0
+# New risk/reward settings.
+core.MIN_REWARD_RISK = 1.5
+core.PREFERRED_REWARD_RISK = 1.5
 
 CONFIG = AdvancedConfig(
-    min_score=65,
-    min_direction_margin=12,
-    min_rr=2.0,
-    target_rr=2.0,
+    min_score=58,
+    min_direction_margin=10,
+    min_rr=1.5,
+    target_rr=1.5,
 )
 
-# V4 already downloads D1 candles in main(), but its original analyze()
-# call passes only candles, H1 and H4. Capture the existing D1 download
-# here so V5 can use it without changing bot_v4.py or downloading D1 again.
+MIN_CANDLES = 220
+MIN_ADX = 15
+MAX_ENTRY_EXTENSION_ATR = 2.0
+
 _D1_CACHE = {}
 _original_get_candles = core.get_candles
 
 
+# ---------------------------------------------------------
+# D1 CACHE
+# ---------------------------------------------------------
+
 def _get_candles_with_d1_cache(symbol, interval):
     data = _original_get_candles(symbol, interval)
+
     if interval == "1d":
         _D1_CACHE[symbol] = data
+
     return data
 
 
 core.get_candles = _get_candles_with_d1_cache
+
+
+# ---------------------------------------------------------
+# HELPERS
+# ---------------------------------------------------------
+
+def _reject(symbol, timeframe, reason):
+    core.logging.info(
+        "[V5 REJECT] %s %s | %s",
+        symbol, timeframe, reason
+    )
+    return None
 
 
 def _higher_timeframes(timeframe, h1, h4, d1):
@@ -60,16 +83,20 @@ def _higher_timeframes(timeframe, h1, h4, d1):
     return frames
 
 
-def _reject(symbol, timeframe, reason):
-    core.logging.info(
-        "[V5 REJECT] %s %s | %s",
-        symbol, timeframe, reason
-    )
-    return None
+def _safe_float(value, default=0.0):
+    try:
+        result = float(value)
+        return result if math.isfinite(result) else default
+    except (TypeError, ValueError):
+        return default
 
+
+# ---------------------------------------------------------
+# MAIN ANALYSIS
+# ---------------------------------------------------------
 
 def analyze_v5(symbol, timeframe, candles, h1, h4):
-    """V5 signal analysis with detailed rejection diagnostics."""
+    """V5.1 signal analysis with improved filtering."""
 
     d1 = _D1_CACHE.get(symbol)
 
@@ -92,18 +119,21 @@ def analyze_v5(symbol, timeframe, candles, h1, h4):
         "D1": len(d1),
     }
 
-    if min(lengths.values()) < 220:
+    if min(lengths.values()) < MIN_CANDLES:
         return _reject(
-            symbol, timeframe,
-            f"Not enough candles: {lengths}"
+            symbol,
+            timeframe,
+            f"Insufficient candles: {lengths}"
         )
 
     try:
+        frames = _higher_timeframes(
+            timeframe, h1, h4, d1
+        )
+
         result = analyze_advanced(
             entry_df=pd.DataFrame(candles),
-            higher_timeframes=_higher_timeframes(
-                timeframe, h1, h4, d1
-            ),
+            higher_timeframes=frames,
             config=CONFIG,
         )
 
@@ -113,33 +143,38 @@ def analyze_v5(symbol, timeframe, candles, h1, h4):
         side = result.get("signal")
 
         htf = result.get("higher_timeframes", {})
+        market = result.get("market", {})
+        structure = result.get("structure", {})
 
         core.logging.info(
             "[V5 ANALYSIS] %s %s | Signal=%s | "
             "BUY=%s SELL=%s Margin=%s | HTF=%s",
-            symbol, timeframe, side,
-            buy_score, sell_score, margin, htf
+            symbol,
+            timeframe,
+            side,
+            buy_score,
+            sell_score,
+            margin,
+            htf
         )
 
         if side not in ("BUY", "SELL"):
-            reasons = result.get("reasons", {})
             return _reject(
-                symbol, timeframe,
+                symbol,
+                timeframe,
                 f"HOLD | BUY={buy_score} SELL={sell_score} "
-                f"Margin={margin} | Reasons={reasons}"
+                f"Margin={margin} | Reasons={result.get('reasons', {})}"
             )
 
-        entry = float(result["entry"])
-        sl = float(result["stop_loss"])
-        tp = float(result["take_profit"])
-        rr = float(result["risk_reward"])
+        entry = _safe_float(result.get("entry"))
+        sl = _safe_float(result.get("stop_loss"))
+        tp = _safe_float(result.get("take_profit"))
+        rr = _safe_float(result.get("risk_reward"))
 
-        values = (entry, sl, tp, rr)
-
-        if not all(math.isfinite(x) for x in values):
+        if min(entry, sl, tp, rr) <= 0:
             return _reject(
                 symbol, timeframe,
-                "Invalid or non-finite Entry/SL/TP/RR"
+                "Invalid Entry/SL/TP/RR"
             )
 
         if side == "BUY" and not (sl < entry < tp):
@@ -156,56 +191,136 @@ def analyze_v5(symbol, timeframe, candles, h1, h4):
 
         risk = abs(entry - sl)
         reward = abs(tp - entry)
-        actual_rr = reward / risk if risk > 0 else 0
 
         if risk <= 0:
             return _reject(
-                symbol, timeframe, "Risk is zero or negative"
-            )
-
-        if actual_rr < 2.0 or rr < 2.0:
-            return _reject(
                 symbol, timeframe,
-                f"RR below 1:2 | Actual={actual_rr:.2f} "
-                f"Calculated={rr:.2f}"
+                "Risk is zero"
             )
 
-        required_by_tf = {
-            "M15": ("H1", "H4", "D1"),
-            "M30": ("H1", "H4", "D1"),
-            "H1": ("H4", "D1"),
-            "H4": ("D1",),
-        }
+        actual_rr = reward / risk
 
-        required = required_by_tf.get(
-            timeframe, ("H1", "H4", "D1")
-        )
+        if actual_rr < CONFIG.min_rr or rr < CONFIG.min_rr:
+            return _reject(
+                symbol,
+                timeframe,
+                f"RR below {CONFIG.min_rr:.1f} | "
+                f"Actual={actual_rr:.2f} Calculated={rr:.2f}"
+            )
 
         expected = 1 if side == "BUY" else -1
 
-        for name in required:
-            item = htf.get(name, {})
-            direction = item.get("direction")
+        # -------------------------------------------------
+        # HIGHER TIMEFRAME FILTER
+        # -------------------------------------------------
+        # D1 opposite direction is a strong warning.
+        # H4 opposite direction is also rejected on lower
+        # entry timeframes.
+        # Neutral HTF direction is allowed.
+        d1_direction = htf.get("D1", {}).get("direction", 0)
+        h4_direction = htf.get("H4", {}).get("direction", 0)
 
-            if direction != expected:
+        if d1_direction == -expected:
+            return _reject(
+                symbol,
+                timeframe,
+                "D1 trend strongly opposes signal"
+            )
+
+        if timeframe in ("M15", "M30", "H1"):
+            if h4_direction == -expected:
                 return _reject(
-                    symbol, timeframe,
-                    f"HTF mismatch: {name} direction={direction}, "
-                    f"required={expected}"
+                    symbol,
+                    timeframe,
+                    "H4 trend strongly opposes signal"
                 )
 
-        market = result.get("market", {})
+        # -------------------------------------------------
+        # MARKET QUALITY FILTER
+        # -------------------------------------------------
 
-        atr = float(market.get("atr") or 0)
-        rsi = float(market.get("rsi") or 50)
-        adx = float(market.get("adx") or 0)
-        plus_di = float(market.get("plus_di") or 0)
-        minus_di = float(market.get("minus_di") or 0)
+        atr = _safe_float(market.get("atr"))
+        adx = _safe_float(market.get("adx"))
+        rsi = _safe_float(market.get("rsi"), 50)
+        plus_di = _safe_float(market.get("plus_di"))
+        minus_di = _safe_float(market.get("minus_di"))
 
         if atr <= 0:
             return _reject(
-                symbol, timeframe, "ATR is zero or invalid"
+                symbol, timeframe,
+                "ATR invalid"
             )
+
+        # Avoid weak sideways markets unless there is
+        # a confirmed structure break or liquidity sweep.
+        bullish_structure = (
+            structure.get("bullish_bos")
+            or structure.get("bullish_sweep")
+        )
+
+        bearish_structure = (
+            structure.get("bearish_bos")
+            or structure.get("bearish_sweep")
+        )
+
+        has_structure = (
+            bullish_structure if side == "BUY"
+            else bearish_structure
+        )
+
+        if adx < MIN_ADX and not has_structure:
+            return _reject(
+                symbol,
+                timeframe,
+                f"Weak market strength: ADX={adx:.1f}"
+            )
+
+        # Avoid entries where price has already moved
+        # too far away from its fast EMA.
+        ema_fast = _safe_float(
+            market.get("ema_fast"), entry
+        )
+
+        extension = abs(entry - ema_fast) / atr
+
+        if extension > MAX_ENTRY_EXTENSION_ATR:
+            return _reject(
+                symbol,
+                timeframe,
+                f"Price overextended: {extension:.2f} ATR"
+            )
+
+        # Avoid buying extremely overbought conditions
+        # or selling extremely oversold conditions.
+        if side == "BUY" and rsi >= 78:
+            return _reject(
+                symbol, timeframe,
+                f"BUY RSI too high: {rsi:.1f}"
+            )
+
+        if side == "SELL" and rsi <= 22:
+            return _reject(
+                symbol, timeframe,
+                f"SELL RSI too low: {rsi:.1f}"
+            )
+
+        # Directional momentum should not strongly oppose
+        # the proposed signal.
+        if side == "BUY" and minus_di > plus_di * 1.35:
+            return _reject(
+                symbol, timeframe,
+                "Bearish directional momentum conflict"
+            )
+
+        if side == "SELL" and plus_di > minus_di * 1.35:
+            return _reject(
+                symbol, timeframe,
+                "Bullish directional momentum conflict"
+            )
+
+        # -------------------------------------------------
+        # SIGNAL DATA
+        # -------------------------------------------------
 
         factor = core.usd_value_per_price_unit(
             symbol, entry
@@ -222,7 +337,6 @@ def analyze_v5(symbol, timeframe, candles, h1, h4):
         )
 
         candle = candles[-1]
-
         score = max(buy_score, sell_score)
 
         signal = {
@@ -251,15 +365,24 @@ def analyze_v5(symbol, timeframe, candles, h1, h4):
             "ema50": market.get("ema_mid") or entry,
             "ema200": market.get("ema_slow") or entry,
             "supertrend": expected,
-            "h1_direction": expected,
-            "h4_direction": expected,
+            "h1_direction": htf.get(
+                "H1", {}
+            ).get("direction", 0),
+            "h4_direction": h4_direction,
             "structure_buy": buy_score,
             "structure_sell": sell_score,
         }
 
         core.logging.info(
-            "[V5 ACCEPT] %s %s | %s | Score=%s | RR=%.2f",
-            symbol, timeframe, side, score, actual_rr
+            "[V5 ACCEPT] %s %s | %s | "
+            "Score=%s | RR=%.2f | ADX=%.1f | RSI=%.1f",
+            symbol,
+            timeframe,
+            side,
+            score,
+            actual_rr,
+            adx,
+            rsi
         )
 
         return signal
@@ -272,13 +395,19 @@ def analyze_v5(symbol, timeframe, candles, h1, h4):
         return None
 
 
-# V4 main() resolves this global function at runtime.
+# ---------------------------------------------------------
+# CONNECT TO V4 ENGINE
+# ---------------------------------------------------------
+
 core.analyze = analyze_v5
 
 
 if __name__ == "__main__":
     core.logging.info(
-        "Forex Signals Bot V5 started: Brent OFF, minimum RR 1:2, "
-        "advanced H1/H4/D1 confirmation ON"
+        "Forex Signals Bot V5.1 started | "
+        "Brent OFF | RR 1:1.5 | "
+        "D1/H4 trend filter | "
+        "ADX/RSI/EMA extension filters ON"
     )
+
     core.main()
