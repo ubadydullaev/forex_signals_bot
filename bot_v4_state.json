@@ -355,7 +355,7 @@
       ]
     },
     "USDJPY_M30": {
-      "signature": "2026-11-19T06:30:00+00:00_BUY",
+      "signature": "2026-11-19T07:00:00+00:00_BUY",
       "target_users": [
         "1867555949",
         "1906447505",
@@ -1483,8 +1483,12 @@
         "1906447505",
         "8678763398"
       ],
-      "notified_to": [],
-      "status": "OPEN",
+      "notified_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "status": "SL_HIT",
       "diagnostics": {
         "score": 85,
         "adx": 29.525932420163887,
@@ -1502,7 +1506,8 @@
         "structure_buy": 0,
         "structure_sell": 0
       },
-      "created_at": "2026-11-18T18:31:19.885192+00:00"
+      "created_at": "2026-11-18T18:31:19.885192+00:00",
+      "result_candle_time": "2026-11-19T07:00:00+00:00"
     },
     "BRENT_M15_2026-11-18T18:15:00+00:00_SELL": {
       "symbol": "BRENT",
@@ -1598,8 +1603,12 @@
         "1906447505",
         "8678763398"
       ],
-      "notified_to": [],
-      "status": "OPEN",
+      "notified_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "status": "SL_HIT",
       "diagnostics": {
         "score": 85,
         "adx": 29.375620471398605,
@@ -1617,7 +1626,8 @@
         "structure_buy": 0,
         "structure_sell": 0
       },
-      "created_at": "2026-11-18T19:01:34.130933+00:00"
+      "created_at": "2026-11-18T19:01:34.130933+00:00",
+      "result_candle_time": "2026-11-19T07:00:00+00:00"
     },
     "BRENT_M15_2026-11-18T18:45:00+00:00_SELL": {
       "symbol": "BRENT",
@@ -3483,8 +3493,12 @@
         "1906447505",
         "8678763398"
       ],
-      "notified_to": [],
-      "status": "OPEN",
+      "notified_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "status": "SL_HIT",
       "diagnostics": {
         "score": 85,
         "adx": 33.10576779888008,
@@ -3502,7 +3516,8 @@
         "structure_buy": 1,
         "structure_sell": 0
       },
-      "created_at": "2026-11-19T05:31:37.180778+00:00"
+      "created_at": "2026-11-19T05:31:37.180778+00:00",
+      "result_candle_time": "2026-11-19T07:00:00+00:00"
     },
     "USDJPY_M30_2026-11-19T05:00:00+00:00_BUY": {
       "symbol": "USDJPY",
@@ -3668,8 +3683,12 @@
         "1906447505",
         "8678763398"
       ],
-      "notified_to": [],
-      "status": "OPEN",
+      "notified_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "status": "SL_HIT",
       "diagnostics": {
         "score": 85,
         "adx": 31.614477145295513,
@@ -3687,7 +3706,8 @@
         "structure_buy": 2,
         "structure_sell": 0
       },
-      "created_at": "2026-11-19T06:01:32.478203+00:00"
+      "created_at": "2026-11-19T06:01:32.478203+00:00",
+      "result_candle_time": "2026-11-19T07:00:00+00:00"
     },
     "USDJPY_M30_2026-11-19T05:30:00+00:00_BUY": {
       "symbol": "USDJPY",
@@ -3738,8 +3758,12 @@
         "1906447505",
         "8678763398"
       ],
-      "notified_to": [],
-      "status": "OPEN",
+      "notified_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "status": "SL_HIT",
       "diagnostics": {
         "score": 85,
         "adx": 36.17974108480714,
@@ -3757,7 +3781,8 @@
         "structure_buy": 2,
         "structure_sell": 0
       },
-      "created_at": "2026-11-19T06:31:41.584292+00:00"
+      "created_at": "2026-11-19T06:31:41.584292+00:00",
+      "result_candle_time": "2026-11-19T07:00:00+00:00"
     },
     "USDJPY_M30_2026-11-19T06:00:00+00:00_BUY": {
       "symbol": "USDJPY",
@@ -3883,8 +3908,12 @@
         "1906447505",
         "8678763398"
       ],
-      "notified_to": [],
-      "status": "OPEN",
+      "notified_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "status": "SL_HIT",
       "diagnostics": {
         "score": 85,
         "adx": 34.580999063801855,
@@ -3902,7 +3931,8 @@
         "structure_buy": 0,
         "structure_sell": 0
       },
-      "created_at": "2026-11-19T07:01:41.343845+00:00"
+      "created_at": "2026-11-19T07:01:41.343845+00:00",
+      "result_candle_time": "2026-11-19T07:00:00+00:00"
     },
     "USDJPY_M30_2026-11-19T06:30:00+00:00_BUY": {
       "symbol": "USDJPY",
@@ -4078,6 +4108,41 @@
         "structure_sell": 2
       },
       "created_at": "2026-11-19T07:01:46.182726+00:00"
+    },
+    "USDJPY_M30_2026-11-19T07:00:00+00:00_BUY": {
+      "symbol": "USDJPY",
+      "timeframe": "M30",
+      "side": "BUY",
+      "entry": 159.678,
+      "sl": 159.5405991192187,
+      "tp1": 159.89,
+      "signal_candle_time": "2026-11-19T07:00:00+00:00",
+      "signal_candle_end_ms": 1795073400000,
+      "delivered_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "notified_to": [],
+      "status": "OPEN",
+      "diagnostics": {
+        "score": 90,
+        "adx": 21.569752923867032,
+        "plus_di": 28.78615733114803,
+        "minus_di": 12.92118110014257,
+        "rsi": 66.92344279154386,
+        "atr": 0.09160058718753152,
+        "atr_risk_ratio": 1.4999999999998732,
+        "ema20": 159.49472311589082,
+        "ema50": 159.41868354386145,
+        "ema200": 159.377041515844,
+        "supertrend": 1,
+        "h1_direction": 1,
+        "h4_direction": 1,
+        "structure_buy": 2,
+        "structure_sell": 1
+      },
+      "created_at": "2026-11-19T07:31:38.771748+00:00"
     }
   }
 }
