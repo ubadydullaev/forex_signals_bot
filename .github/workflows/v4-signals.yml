@@ -1,47 +1,15 @@
 
-name: Forex V4 Signals
+name: Legacy V4 V5 Signals - DISABLED
 
 on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-
-concurrency:
-  group: forex-v4-signals
-  cancel-in-progress: false
+  contents: read
 
 jobs:
-  scan:
+  disabled:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Install Dukascopy
-        run: npm install dukascopy-node
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Run Forex V5
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          CLOUDFLARE_WORKER_URL: ${{ secrets.CLOUDFLARE_WORKER_URL }}
-          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_REF_NAME: ${{ github.ref_name }}
-        run: python bot_v5.py
+      - name: Legacy signal sender disabled
+        run: echo "V4/V5 signal sending is disabled. V6 is the only active signal engine."
