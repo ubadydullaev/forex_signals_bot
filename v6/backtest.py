@@ -12,7 +12,7 @@ from .config import SYMBOLS, TIMEFRAMES
 from .data_adapter import get_candles, TIMEFRAME_SETTINGS
 from .indicators import calculate_indicators
 from .market_structure import SwingPoint
-from .validators import validate_market_data
+from .validators import validate_market_data, validate_trade
 
 
 # ==========================================
