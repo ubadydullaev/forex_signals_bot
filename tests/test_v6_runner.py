@@ -33,22 +33,31 @@ def make_result(
     )
 
 
+def make_candles(timestamp=123456789):
+    return {
+        "M15": [
+            SimpleNamespace(timestamp=timestamp)
+        ]
+    }
+
+
 class TestV6Runner(unittest.TestCase):
 
     def test_make_signal_key(self):
-        result = make_result()
-        candles = {
-            "M15": [
-                SimpleNamespace(timestamp=123456789)
-            ]
-        }
-
         key, signature = runner.make_signal_key(
-            result, candles
+            make_result(),
+            make_candles(),
         )
 
         self.assertEqual(key, "XAUUSD|M15")
         self.assertEqual(signature, "123456789|BUY")
+
+    def test_make_signal_key_rejects_empty_candles(self):
+        with self.assertRaises(RuntimeError):
+            runner.make_signal_key(
+                make_result(),
+                {"M15": []},
+            )
 
     def test_delivery_record_new_signal(self):
         state = {"signals": {}}
@@ -113,21 +122,30 @@ class TestV6Runner(unittest.TestCase):
 
     def test_format_signal_contains_risk_warning(self):
         message = runner.format_signal(make_result())
+
         self.assertIn("foyda kafolati emas", message)
+
+    def test_format_signal_escapes_html_reason(self):
+        result = make_result()
+        result.signal.reason = "<script>test</script>"
+
+        message = runner.format_signal(result)
+
+        self.assertNotIn("<script>", message)
+        self.assertIn("&lt;script&gt;", message)
 
     @patch.object(runner, "send_telegram")
     @patch.object(runner, "analyze_one_symbol")
     @patch.object(runner, "validate_environment")
     def test_dry_run_does_not_send_telegram(
-        self, mock_validate, mock_analyze, mock_send
+        self,
+        mock_validate,
+        mock_analyze,
+        mock_send,
     ):
         mock_analyze.return_value = (
             make_result(),
-            {
-                "M15": [
-                    SimpleNamespace(timestamp=123456789)
-                ]
-            },
+            make_candles(),
         )
 
         with patch.object(runner, "SYMBOLS", ("XAUUSD",)):
@@ -145,9 +163,12 @@ class TestV6Runner(unittest.TestCase):
             json=lambda: {"users": ["200", "100", "200"]},
             raise_for_status=lambda: None,
         )
+
         mock_session.get.return_value = response
 
-        with patch.object(runner, "WORKER_URL", "https://worker.example"):
+        with patch.object(
+            runner, "WORKER_URL", "https://worker.example"
+        ):
             with patch.object(runner, "WEBHOOK_SECRET", "secret"):
                 with patch.object(runner, "ADMIN_ID", "300"):
                     users = runner.get_users()
@@ -179,7 +200,9 @@ class TestV6Runner(unittest.TestCase):
         )
 
         with patch.object(runner, "GITHUB_TOKEN", "token"):
-            with patch.object(runner, "GITHUB_REPOSITORY", "owner/repo"):
+            with patch.object(
+                runner, "GITHUB_REPOSITORY", "owner/repo"
+            ):
                 state, sha = runner.load_state()
 
         self.assertEqual(state, original)
@@ -192,7 +215,9 @@ class TestV6Runner(unittest.TestCase):
         )
 
         with patch.object(runner, "GITHUB_TOKEN", "token"):
-            with patch.object(runner, "GITHUB_REPOSITORY", "owner/repo"):
+            with patch.object(
+                runner, "GITHUB_REPOSITORY", "owner/repo"
+            ):
                 state, sha = runner.load_state()
 
         self.assertEqual(state, {"signals": {}})
@@ -217,14 +242,19 @@ class TestV6Runner(unittest.TestCase):
         }
 
         with patch.object(runner, "GITHUB_TOKEN", "token"):
-            with patch.object(runner, "GITHUB_REPOSITORY", "owner/repo"):
+            with patch.object(
+                runner, "GITHUB_REPOSITORY", "owner/repo"
+            ):
                 new_sha = runner.save_state(state, "old-sha")
 
         self.assertEqual(new_sha, "new-sha")
 
         payload = mock_session.put.call_args.kwargs["json"]
+
         decoded = json.loads(
-            base64.b64decode(payload["content"]).decode("utf-8")
+            base64.b64decode(
+                payload["content"]
+            ).decode("utf-8")
         )
 
         self.assertEqual(decoded, state)
@@ -245,6 +275,7 @@ class TestV6Runner(unittest.TestCase):
         mock_session.post.assert_called_once()
 
         payload = mock_session.post.call_args.kwargs["json"]
+
         self.assertEqual(payload["chat_id"], "123")
         self.assertEqual(payload["text"], "Test message")
         self.assertEqual(payload["parse_mode"], "HTML")
@@ -263,6 +294,81 @@ class TestV6Runner(unittest.TestCase):
             with patch.object(runner, "BOT_TOKEN", "test-token"):
                 with self.assertRaises(RuntimeError):
                     runner.send_telegram("123", "Test message")
+
+    @patch.object(runner, "save_state", return_value="new-sha")
+    @patch.object(runner, "send_telegram")
+    @patch.object(runner, "get_users", return_value=["100", "200"])
+    @patch.object(
+        runner,
+        "load_state",
+        return_value=({"signals": {}}, None),
+    )
+    @patch.object(runner, "analyze_one_symbol")
+    @patch.object(runner, "validate_environment")
+    def test_failed_user_does_not_block_other_users(
+        self,
+        mock_validate,
+        mock_analyze,
+        mock_load,
+        mock_users,
+        mock_send,
+        mock_save,
+    ):
+        mock_analyze.return_value = (
+            make_result(),
+            make_candles(),
+        )
+
+        mock_send.side_effect = [
+            RuntimeError("First user failed"),
+            True,
+        ]
+
+        with patch.object(runner, "SYMBOLS", ("XAUUSD",)):
+            with patch.object(runner, "TELEGRAM_ENABLED", True):
+                stats = runner.main()
+
+        self.assertEqual(mock_send.call_count, 2)
+        self.assertEqual(stats["sent"], 1)
+        mock_save.assert_called_once()
+
+    @patch.object(
+        runner,
+        "save_state",
+        side_effect=RuntimeError("GitHub unavailable"),
+    )
+    @patch.object(runner, "send_telegram", return_value=True)
+    @patch.object(runner, "get_users", return_value=["100"])
+    @patch.object(
+        runner,
+        "load_state",
+        return_value=({"signals": {}}, None),
+    )
+    @patch.object(runner, "analyze_one_symbol")
+    @patch.object(runner, "validate_environment")
+    def test_state_failure_stops_runner(
+        self,
+        mock_validate,
+        mock_analyze,
+        mock_load,
+        mock_users,
+        mock_send,
+        mock_save,
+    ):
+        mock_analyze.return_value = (
+            make_result(),
+            make_candles(),
+        )
+
+        with patch.object(
+            runner, "SYMBOLS", ("XAUUSD", "XAGUSD")
+        ):
+            with patch.object(runner, "TELEGRAM_ENABLED", True):
+                with self.assertRaises(runner.StatePersistenceError):
+                    runner.main()
+
+        mock_analyze.assert_called_once()
+        mock_send.assert_called_once()
 
 
 if __name__ == "__main__":
