@@ -17,6 +17,7 @@ TRADE_OUTPUT = "backtest_results/v6_cost_results.csv"
 SUMMARY_OUTPUT = "backtest_results/v6_cost_summary.csv"
 
 
+
 def load_broker_costs():
     if not os.path.exists(BROKER_FILE):
         return {}
@@ -41,15 +42,10 @@ def load_broker_costs():
             if not any(raw):
                 continue
 
-            if not all(raw):
-                print(
-                    f"[COST SKIP] {symbol}: "
-                    "spred, slippage yoki komissiya to'liq emas."
-                )
-                continue
-
             try:
-                spread, slippage, commission = map(float, raw)
+                spread = float(raw[0]) if raw[0] else 0.0
+                slippage = float(raw[1]) if raw[1] else 0.0
+                commission = float(raw[2]) if raw[2] else 0.0
             except ValueError as error:
                 raise ValueError(
                     f"{symbol}: xarajat qiymati raqam bo'lishi kerak."
@@ -62,6 +58,21 @@ def load_broker_costs():
                     f"{symbol}: xarajat qiymati noto'g'ri."
                 )
 
+            missing = [
+                name for name, value in zip(
+                    ["slippage", "commission"],
+                    raw[1:]
+                )
+                if not value
+            ]
+
+            if missing:
+                print(
+                    f"[COST PARTIAL] {symbol}: "
+                    f"{', '.join(missing)} kiritilmagan; "
+                    "hisobda vaqtincha 0 deb olindi."
+                )
+
             costs[symbol] = {
                 "spread_price": spread,
                 "slippage_price": slippage,
@@ -69,6 +80,7 @@ def load_broker_costs():
             }
 
     return costs
+
 
 
 def load_trades():
