@@ -17,7 +17,7 @@ from .validators import (
 # ==========================================
 
 MINIMUM_CANDLES = 200
-MINIMUM_ALIGNMENT = 95.0
+MINIMUM_ALIGNMENT = 80.0
 MINIMUM_ADX = 18.0
 MINIMUM_RR = 1.5
 STOP_ATR_MULTIPLIER = 1.5
