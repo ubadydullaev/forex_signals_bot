@@ -15,9 +15,9 @@ from .market_structure import SwingPoint
 from .validators import validate_market_data, validate_trade
 
 
-# ==========================================
-# V6 OPTIMIZED HISTORICAL BACKTEST
-# ==========================================
+# ============================================================
+# V6 HISTORICAL BACKTEST
+# ============================================================
 
 HISTORY_LIMITS = {
     "M15": 8500,
@@ -54,13 +54,12 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
 )
-
 logger = logging.getLogger("V6_BACKTEST")
 
 
-# ==========================================
+# ============================================================
 # DIAGNOSTICS
-# ==========================================
+# ============================================================
 
 def create_diagnostics():
     return {
@@ -79,29 +78,15 @@ def create_diagnostics():
 
 def record_hold(diagnostics, reason):
     diagnostics["hold_count"] += 1
-
-    reason = str(
-        reason or "HOLD sababi ko'rsatilmagan"
-    ).strip()
-
-    diagnostics["hold_reasons"][
-        reason or "HOLD sababi ko'rsatilmagan"
-    ] += 1
+    reason = str(reason or "HOLD sababi ko'rsatilmagan").strip()
+    diagnostics["hold_reasons"][reason] += 1
 
 
-# ==========================================
-# INCREMENTAL MARKET STRUCTURE
-# ==========================================
+# ============================================================
+# MARKET STRUCTURE
+# ============================================================
 
 class StructureTracker:
-    """
-    Original market_structure.py qoidalarini
-    shamma-sham hisoblaydi.
-
-    Har bir yangi shamda butun tarix qayta
-    tekshirilmaydi.
-    """
-
     def __init__(self, candles, left=3, right=3):
         self.candles = candles
         self.left = left
@@ -112,53 +97,35 @@ class StructureTracker:
 
         self.active_event_highs = []
         self.active_event_lows = []
-
         self.active_sweep_highs = []
         self.active_sweep_lows = []
 
         self.broken_highs = set()
         self.broken_lows = set()
-
         self.consumed_highs = set()
         self.consumed_lows = set()
 
         self.current_structure = "UNKNOWN"
 
-        self.event_directions = [
-            [] for _ in candles
-        ]
-
-        self.sweep_directions = [
-            [] for _ in candles
-        ]
+        self.event_directions = [[] for _ in candles]
+        self.sweep_directions = [[] for _ in candles]
 
         self._event_high_pointer = 0
         self._event_low_pointer = 0
-
         self._sweep_high_pointer = 0
         self._sweep_low_pointer = 0
 
-        self._all_high_points = []
-        self._all_low_points = []
-
-        self.trends = [
-            "UNKNOWN" for _ in candles
-        ]
-
+        self.trends = ["UNKNOWN" for _ in candles]
         self._build()
 
     def _is_pivot(self, index, kind):
-        if (
-            index < self.left
-            or index + self.right >= len(self.candles)
-        ):
+        if index < self.left or index + self.right >= len(self.candles):
             return False
 
-        current = self.candles[index]
+        candle = self.candles[index]
 
         if kind == "HIGH":
-            price = current.high
-
+            price = candle.high
             return all(
                 price > self.candles[j].high
                 for j in (
@@ -167,8 +134,7 @@ class StructureTracker:
                 )
             )
 
-        price = current.low
-
+        price = candle.low
         return all(
             price < self.candles[j].low
             for j in (
@@ -184,61 +150,58 @@ class StructureTracker:
         candle = self.candles[index]
 
         if self._is_pivot(index, "HIGH"):
-            self.highs.append(
-                SwingPoint(
-                    index=index,
-                    timestamp=candle.timestamp,
-                    price=candle.high,
-                    kind="HIGH",
-                )
-            )
+            self.highs.append(SwingPoint(
+                index=index,
+                timestamp=candle.timestamp,
+                price=candle.high,
+                kind="HIGH",
+            ))
 
         if self._is_pivot(index, "LOW"):
-            self.lows.append(
-                SwingPoint(
-                    index=index,
-                    timestamp=candle.timestamp,
-                    price=candle.low,
-                    kind="LOW",
-                )
-            )
+            self.lows.append(SwingPoint(
+                index=index,
+                timestamp=candle.timestamp,
+                price=candle.low,
+                kind="LOW",
+            ))
 
-    def _activate_event_levels(self, candle_index):
+    def _activate_levels(self, candle_index):
         limit = candle_index - self.right
 
         while (
             self._event_high_pointer < len(self.highs)
             and self.highs[self._event_high_pointer].index < limit
         ):
-            point = self.highs[self._event_high_pointer]
-            self.active_event_highs.append(point)
+            self.active_event_highs.append(
+                self.highs[self._event_high_pointer]
+            )
             self._event_high_pointer += 1
 
         while (
             self._event_low_pointer < len(self.lows)
             and self.lows[self._event_low_pointer].index < limit
         ):
-            point = self.lows[self._event_low_pointer]
-            self.active_event_lows.append(point)
+            self.active_event_lows.append(
+                self.lows[self._event_low_pointer]
+            )
             self._event_low_pointer += 1
-
-    def _activate_sweep_levels(self, candle_index):
-        limit = candle_index - self.right
 
         while (
             self._sweep_high_pointer < len(self.highs)
             and self.highs[self._sweep_high_pointer].index < limit
         ):
-            point = self.highs[self._sweep_high_pointer]
-            self.active_sweep_highs.append(point)
+            self.active_sweep_highs.append(
+                self.highs[self._sweep_high_pointer]
+            )
             self._sweep_high_pointer += 1
 
         while (
             self._sweep_low_pointer < len(self.lows)
             and self.lows[self._sweep_low_pointer].index < limit
         ):
-            point = self.lows[self._sweep_low_pointer]
-            self.active_sweep_lows.append(point)
+            self.active_sweep_lows.append(
+                self.lows[self._sweep_low_pointer]
+            )
             self._sweep_low_pointer += 1
 
     def _process_events(self, index):
@@ -249,150 +212,85 @@ class StructureTracker:
         previous_close = self.candles[index - 1].close
 
         available_highs = [
-            point
-            for point in self.active_event_highs
-            if point.index not in self.broken_highs
+            p for p in self.active_event_highs
+            if p.index not in self.broken_highs
         ]
 
         crossed_highs = [
-            point
-            for point in available_highs
-            if (
-                previous_close <= point.price
-                and candle.close > point.price
-            )
+            p for p in available_highs
+            if previous_close <= p.price < candle.close
         ]
 
         for point in available_highs:
-            if (
-                previous_close > point.price
-                and candle.close > point.price
-            ):
+            if previous_close > point.price and candle.close > point.price:
                 self.broken_highs.add(point.index)
 
         if crossed_highs:
-            candidate = crossed_highs[-1]
-
-            event_type = (
-                "CHOCH"
-                if self.current_structure == "BEARISH"
-                else "BOS"
-            )
-
-            self.event_directions[index].append(
-                "BULLISH"
-            )
-
+            self.event_directions[index].append("BULLISH")
             self.current_structure = "BULLISH"
-
-            for point in crossed_highs:
-                self.broken_highs.add(point.index)
+            self.broken_highs.update(p.index for p in crossed_highs)
 
         available_lows = [
-            point
-            for point in self.active_event_lows
-            if point.index not in self.broken_lows
+            p for p in self.active_event_lows
+            if p.index not in self.broken_lows
         ]
 
         crossed_lows = [
-            point
-            for point in available_lows
-            if (
-                previous_close >= point.price
-                and candle.close < point.price
-            )
+            p for p in available_lows
+            if previous_close >= p.price > candle.close
         ]
 
         for point in available_lows:
-            if (
-                previous_close < point.price
-                and candle.close < point.price
-            ):
+            if previous_close < point.price and candle.close < point.price:
                 self.broken_lows.add(point.index)
 
         if crossed_lows:
-            candidate = crossed_lows[-1]
-
-            event_type = (
-                "CHOCH"
-                if self.current_structure == "BULLISH"
-                else "BOS"
-            )
-
-            self.event_directions[index].append(
-                "BEARISH"
-            )
-
+            self.event_directions[index].append("BEARISH")
             self.current_structure = "BEARISH"
-
-            for point in crossed_lows:
-                self.broken_lows.add(point.index)
+            self.broken_lows.update(p.index for p in crossed_lows)
 
     def _process_sweeps(self, index):
         candle = self.candles[index]
 
         available_highs = [
-            point
-            for point in self.active_sweep_highs
-            if point.index not in self.consumed_highs
+            p for p in self.active_sweep_highs
+            if p.index not in self.consumed_highs
         ]
 
         swept_highs = [
-            point
-            for point in available_highs
-            if (
-                candle.high > point.price
-                and candle.close < point.price
-            )
+            p for p in available_highs
+            if candle.high > p.price and candle.close < p.price
         ]
 
         if swept_highs:
-            self.sweep_directions[index].append(
-                "BEARISH"
-            )
-
-            for point in swept_highs:
-                self.consumed_highs.add(point.index)
+            self.sweep_directions[index].append("BEARISH")
+            self.consumed_highs.update(p.index for p in swept_highs)
 
         for point in available_highs:
             if candle.close > point.price:
                 self.consumed_highs.add(point.index)
 
         available_lows = [
-            point
-            for point in self.active_sweep_lows
-            if point.index not in self.consumed_lows
+            p for p in self.active_sweep_lows
+            if p.index not in self.consumed_lows
         ]
 
         swept_lows = [
-            point
-            for point in available_lows
-            if (
-                candle.low < point.price
-                and candle.close > point.price
-            )
+            p for p in available_lows
+            if candle.low < p.price and candle.close > p.price
         ]
 
         if swept_lows:
-            self.sweep_directions[index].append(
-                "BULLISH"
-            )
-
-            for point in swept_lows:
-                self.consumed_lows.add(point.index)
+            self.sweep_directions[index].append("BULLISH")
+            self.consumed_lows.update(p.index for p in swept_lows)
 
         for point in available_lows:
             if candle.close < point.price:
                 self.consumed_lows.add(point.index)
 
     def _update_trend(self, index):
-        highs = [
-            point.price for point in self.highs
-        ]
-
-        lows = [
-            point.price for point in self.lows
-        ]
+        highs = [p.price for p in self.highs]
+        lows = [p.price for p in self.lows]
 
         if len(highs) < 2 or len(lows) < 2:
             self.trends[index] = "UNKNOWN"
@@ -400,71 +298,51 @@ class StructureTracker:
 
         higher_high = highs[-1] > highs[-2]
         higher_low = lows[-1] > lows[-2]
-
         lower_high = highs[-1] < highs[-2]
         lower_low = lows[-1] < lows[-2]
 
         if higher_high and higher_low:
             self.trends[index] = "BULLISH"
-
         elif lower_high and lower_low:
             self.trends[index] = "BEARISH"
-
         else:
             self.trends[index] = "RANGING"
 
     def _build(self):
         for index in range(len(self.candles)):
-            # At index i, pivot i-right is now confirmed.
             pivot_index = index - self.right
 
             if pivot_index >= self.left:
                 self._add_confirmed_pivot(pivot_index)
 
-            # Event/sweep levels require pivot.index + right < i.
-            self._activate_event_levels(index)
-            self._activate_sweep_levels(index)
-
+            self._activate_levels(index)
             self._process_events(index)
             self._process_sweeps(index)
-
             self._update_trend(index)
 
     def recent_event(self, index, direction):
-        start = max(
-            0,
-            index - RECENT_STRUCTURE_CANDLES + 1,
-        )
-
+        start = max(0, index - RECENT_STRUCTURE_CANDLES + 1)
         return any(
             direction in self.event_directions[i]
             for i in range(start, index + 1)
         )
 
     def recent_sweep(self, index, direction):
-        start = max(
-            0,
-            index - RECENT_STRUCTURE_CANDLES + 1,
-        )
-
+        start = max(0, index - RECENT_STRUCTURE_CANDLES + 1)
         return any(
             direction in self.sweep_directions[i]
             for i in range(start, index + 1)
         )
 
 
-# ==========================================
+# ============================================================
 # INDICATOR CACHE
-# ==========================================
+# ============================================================
 
 class TimeframeCache:
     def __init__(self, candles):
         self.candles = candles
-
-        # Each indicator is calculated once for the full history.
         self.indicators = calculate_indicators(candles)
-
-        # Structure is calculated incrementally.
         self.structure = StructureTracker(candles)
 
     def value(self, name, index):
@@ -477,9 +355,9 @@ class TimeframeCache:
         return self.structure.trends[index]
 
 
-# ==========================================
-# CACHED MTF ANALYSIS
-# ==========================================
+# ============================================================
+# TIMEFRAME ANALYSIS
+# ============================================================
 
 def analyze_cached_timeframe(cache, index, timeframe):
     indicators = cache.indicators
@@ -490,26 +368,16 @@ def analyze_cached_timeframe(cache, index, timeframe):
 
     rsi_value = indicators["rsi_14"][index]
     adx_value = indicators["adx"]["adx"][index]
-
-    supertrend_direction = (
-        indicators["supertrend"]["direction"][index]
-    )
-
-    structure_trend = cache.structure_trend(index)
+    supertrend_direction = indicators["supertrend"]["direction"][index]
 
     ema_trend = "UNKNOWN"
     trend = "UNKNOWN"
 
-    if all(
-        value is not None
-        for value in (ema20, ema50, ema200)
-    ):
+    if all(v is not None for v in (ema20, ema50, ema200)):
         if ema20 > ema50 > ema200:
             ema_trend = "BULLISH"
-
         elif ema20 < ema50 < ema200:
             ema_trend = "BEARISH"
-
         else:
             ema_trend = "RANGING"
 
@@ -530,8 +398,7 @@ def analyze_cached_timeframe(cache, index, timeframe):
 
     strength = (
         min(max(adx_value, 0.0), 100.0)
-        if adx_value is not None
-        else 0.0
+        if adx_value is not None else 0.0
     )
 
     return {
@@ -544,19 +411,15 @@ def analyze_cached_timeframe(cache, index, timeframe):
         "ema_50": ema50,
         "ema_200": ema200,
         "supertrend_direction": supertrend_direction,
-        "structure_trend": structure_trend,
+        "structure_trend": cache.structure_trend(index),
     }
 
 
 def analyze_cached_mtf(caches, indices):
-    results = {}
-
-    for timeframe in TIMEFRAMES:
-        results[timeframe] = analyze_cached_timeframe(
-            caches[timeframe],
-            indices[timeframe],
-            timeframe,
-        )
+    results = {
+        tf: analyze_cached_timeframe(caches[tf], indices[tf], tf)
+        for tf in TIMEFRAMES
+    }
 
     bullish_score = 0.0
     bearish_score = 0.0
@@ -567,35 +430,25 @@ def analyze_cached_mtf(caches, indices):
     )
 
     for timeframe, result in results.items():
-        weight = TIMEFRAME_WEIGHTS.get(
-            timeframe,
-            1.0,
-        )
+        weight = TIMEFRAME_WEIGHTS.get(timeframe, 1.0)
 
         if result["trend"] == "BULLISH":
             bullish_score += weight
-
         elif result["trend"] == "BEARISH":
             bearish_score += weight
 
-    if bullish_score == 0.0 and bearish_score == 0.0:
+    if bullish_score == 0 and bearish_score == 0:
         overall_trend = "UNKNOWN"
         alignment = 0.0
-
     elif bullish_score > bearish_score:
         overall_trend = "BULLISH"
         alignment = bullish_score / total_weight * 100.0
-
     elif bearish_score > bullish_score:
         overall_trend = "BEARISH"
         alignment = bearish_score / total_weight * 100.0
-
     else:
         overall_trend = "RANGING"
-        alignment = (
-            max(bullish_score, bearish_score)
-            / total_weight * 100.0
-        )
+        alignment = max(bullish_score, bearish_score) / total_weight * 100.0
 
     higher_confirmation = (
         overall_trend in ("BULLISH", "BEARISH")
@@ -618,9 +471,10 @@ def analyze_cached_mtf(caches, indices):
     }
 
 
-# ==========================================
-# CACHED SIGNAL ANALYSIS
-# ==========================================
+# ============================================================
+# TRADE VALIDATION
+# ============================================================
+
 def validate_cached_trade(
     side,
     entry,
@@ -637,10 +491,13 @@ def validate_cached_trade(
         minimum_rr=MINIMUM_RR,
     )
 
-    return (
-        validation.valid,
-        "; ".join(validation.reasons),
-    )
+    return validation.valid, "; ".join(validation.reasons)
+
+
+# ============================================================
+# SIGNAL ANALYSIS
+# ============================================================
+
 def analyze_cached_signal(symbol, caches, indices):
     mtf = analyze_cached_mtf(caches, indices)
 
@@ -651,34 +508,22 @@ def analyze_cached_signal(symbol, caches, indices):
         return None, "No clear multi-timeframe direction"
 
     if alignment < MINIMUM_ALIGNMENT:
-        return None, (
-            f"MTF alignment too low: {alignment:.2f}% "
-            f"(minimum {MINIMUM_ALIGNMENT:.2f}%)"
-        )
+        return None, f"MTF alignment too low: {alignment:.2f}%"
 
     if not mtf["higher_confirmation"]:
         return None, "D1, H4 and H1 do not fully agree"
 
     if not mtf["lower_confirmation"]:
-        return None, (
-            "M30 does not confirm the higher-timeframe direction"
-        )
+        return None, "M30 does not confirm higher-timeframe direction"
 
     m15_index = indices["M15"]
     m15_cache = caches["M15"]
-
     indicators = m15_cache.indicators
     structure = m15_cache.structure
 
-    expected_supertrend = (
-        1 if direction == "BULLISH" else -1
-    )
+    expected_supertrend = 1 if direction == "BULLISH" else -1
 
-    supertrend_direction = (
-        indicators["supertrend"]["direction"][m15_index]
-    )
-
-    if supertrend_direction != expected_supertrend:
+    if indicators["supertrend"]["direction"][m15_index] != expected_supertrend:
         return None, "M15 Supertrend does not confirm direction"
 
     rsi_value = indicators["rsi_14"][m15_index]
@@ -686,13 +531,11 @@ def analyze_cached_signal(symbol, caches, indices):
     if rsi_value is None:
         return None, "RSI data unavailable"
 
-    if direction == "BULLISH":
-        if not 50.0 < rsi_value < 75.0:
-            return None, "RSI does not confirm BUY"
+    if direction == "BULLISH" and not 50.0 < rsi_value < 75.0:
+        return None, "RSI does not confirm BUY"
 
-    else:
-        if not 25.0 < rsi_value < 50.0:
-            return None, "RSI does not confirm SELL"
+    if direction == "BEARISH" and not 25.0 < rsi_value < 50.0:
+        return None, "RSI does not confirm SELL"
 
     adx_value = indicators["adx"]["adx"][m15_index]
 
@@ -703,87 +546,55 @@ def analyze_cached_signal(symbol, caches, indices):
     signal_line = indicators["macd"]["signal"][m15_index]
     histogram = indicators["macd"]["histogram"][m15_index]
 
-    if (
-        macd_line is None
-        or signal_line is None
-        or histogram is None
-    ):
+    if any(v is None for v in (macd_line, signal_line, histogram)):
         return None, "MACD does not confirm direction"
 
     if direction == "BULLISH":
-        macd_confirmed = (
-            macd_line > signal_line
-            and histogram > 0
-        )
+        macd_confirmed = macd_line > signal_line and histogram > 0
     else:
-        macd_confirmed = (
-            macd_line < signal_line
-            and histogram < 0
-        )
+        macd_confirmed = macd_line < signal_line and histogram < 0
 
     if not macd_confirmed:
         return None, "MACD does not confirm direction"
 
     structure_trend = structure.trends[m15_index]
 
-    if structure_trend != direction:
-        if not structure.recent_event(
-            m15_index,
-            direction,
-        ):
-            return None, "No recent BOS/CHOCH confirmation"
+    if structure_trend != direction and not structure.recent_event(
+        m15_index, direction
+    ):
+        return None, "No recent BOS/CHOCH confirmation"
 
     atr_value = indicators["atr_14"][m15_index]
 
     if atr_value is None or atr_value <= 0:
         return None, "ATR is unavailable"
 
-    latest_candle = m15_cache.candles[m15_index]
-    entry = latest_candle.close
-
+    entry = m15_cache.candles[m15_index].close
     stop_distance = atr_value * STOP_ATR_MULTIPLIER
-
-    side = (
-        "BUY" if direction == "BULLISH"
-        else "SELL"
-    )
+    side = "BUY" if direction == "BULLISH" else "SELL"
 
     if side == "BUY":
         stop_loss = entry - stop_distance
         take_profit = entry + stop_distance * MINIMUM_RR
-
     else:
         stop_loss = entry + stop_distance
         take_profit = entry - stop_distance * MINIMUM_RR
 
-   if (
-        entry <= 0
-        or stop_loss <= 0
-        or take_profit <= 0
-        or not all(
-            math.isfinite(value)
-            for value in (entry, stop_loss, take_profit)
-        )
-    ):
+    levels = (entry, stop_loss, take_profit, atr_value)
+
+    if not all(math.isfinite(v) and v > 0 for v in levels):
         return None, "Invalid trade levels"
 
-    trade_valid, validation_reason = validate_cached_trade(
-        side=side,
-        entry=entry,
-        stop_loss=stop_loss,
-        take_profit=take_profit,
-        atr_value=atr_value,
+    valid, reason = validate_cached_trade(
+        side, entry, stop_loss, take_profit, atr_value
     )
 
-    if not trade_valid:
-        return None, validation_reason
-
-    adx_for_confidence = adx_value or 0.0
+    if not valid:
+        return None, reason or "Trade validation failed"
 
     confidence = min(
         95.0,
-        alignment * 0.7
-        + min(adx_for_confidence, 50.0) * 0.6,
+        alignment * 0.7 + min(adx_value, 50.0) * 0.6,
     )
 
     return {
@@ -793,28 +604,23 @@ def analyze_cached_signal(symbol, caches, indices):
         "stop_loss": stop_loss,
         "take_profit": take_profit,
         "risk_reward": MINIMUM_RR,
+        "atr_value": atr_value,
         "confidence": round(confidence, 2),
     }, None
 
 
-# ==========================================
+# ============================================================
 # CANDLE TIME MANAGEMENT
-# ==========================================
+# ============================================================
 
 def candle_close_times(candles, timeframe):
-    duration = TIMEFRAME_SETTINGS[
-        timeframe
-    ]["duration_ms"]
-
-    return [
-        candle.timestamp + duration
-        for candle in candles
-    ]
+    duration = TIMEFRAME_SETTINGS[timeframe]["duration_ms"]
+    return [c.timestamp + duration for c in candles]
 
 
-# ==========================================
+# ============================================================
 # EXECUTION LEVELS
-# ==========================================
+# ============================================================
 
 def build_execution_levels(signal, actual_entry):
     try:
@@ -822,59 +628,55 @@ def build_execution_levels(signal, actual_entry):
         original_sl = float(signal["stop_loss"])
         actual_entry = float(actual_entry)
         rr = float(signal["risk_reward"])
-
-    except (
-        TypeError,
-        ValueError,
-        OverflowError,
-    ):
+        atr_value = float(signal["atr_value"])
+        side = str(signal["side"]).upper()
+    except (KeyError, TypeError, ValueError, OverflowError):
         return None, "invalid_levels"
 
-    values = (
-        reference_entry,
-        original_sl,
-        actual_entry,
-        rr,
-    )
+    values = (reference_entry, original_sl, actual_entry, rr, atr_value)
 
-    if not all(
-        math.isfinite(value) and value > 0
-        for value in values
-    ):
+    if not all(math.isfinite(v) and v > 0 for v in values):
         return None, "invalid_levels"
 
-    risk_distance = abs(
-        reference_entry - original_sl
-    )
+    risk_distance = abs(reference_entry - original_sl)
 
     if risk_distance <= 0:
         return None, "invalid_risk"
 
-    if rr < 1.0:
+    if rr < MINIMUM_RR:
         return None, "invalid_rr"
 
-    entry_drift = abs(
-        actual_entry - reference_entry
-    )
-
+    entry_drift = abs(actual_entry - reference_entry)
     drift_r = entry_drift / risk_distance
 
     if drift_r > MAX_ENTRY_DRIFT_R:
         return None, "entry_drift"
 
-    if signal["side"] == "BUY":
+    if side == "BUY":
         stop_loss = actual_entry - risk_distance
         take_profit = actual_entry + risk_distance * rr
-
-    elif signal["side"] == "SELL":
+    elif side == "SELL":
         stop_loss = actual_entry + risk_distance
         take_profit = actual_entry - risk_distance * rr
-
     else:
         return None, "invalid_side"
 
     if stop_loss <= 0 or take_profit <= 0:
         return None, "invalid_levels"
+
+    # Muhim: qayta tekshiruv aynan real kirish narxida bajariladi.
+    valid, reason = validate_cached_trade(
+        side=side,
+        entry=actual_entry,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
+        atr_value=atr_value,
+    )
+
+    if not valid:
+        return None, "trade_validation: " + (
+            reason or "Execution trade validation failed"
+        )
 
     return {
         "reference_entry": reference_entry,
@@ -884,20 +686,15 @@ def build_execution_levels(signal, actual_entry):
         "risk_distance": risk_distance,
         "risk_reward": rr,
         "entry_drift_r": drift_r,
+        "atr_value": atr_value,
     }, None
 
 
-# ==========================================
+# ============================================================
 # EXIT CALCULATION
-# ==========================================
+# ============================================================
 
-def calculate_exit(
-    candles,
-    start_index,
-    side,
-    stop_loss,
-    take_profit,
-):
+def calculate_exit(candles, start_index, side, stop_loss, take_profit):
     last_index = min(
         len(candles) - 1,
         start_index + MAX_HOLD_BARS - 1,
@@ -913,6 +710,7 @@ def calculate_exit(
             hit_sl = candle.high >= stop_loss
             hit_tp = candle.low <= take_profit
 
+        # Bir shamda SL va TP ikkalasi tegsa, konservativ ravishda SL.
         if hit_sl:
             return {
                 "outcome": "SL",
@@ -934,10 +732,6 @@ def calculate_exit(
     }
 
 
-# ==========================================
-# R MULTIPLE
-# ==========================================
-
 def calculate_r(entry, exit_price, stop_loss, side):
     if side == "BUY":
         risk = entry - stop_loss
@@ -952,9 +746,9 @@ def calculate_r(entry, exit_price, stop_loss, side):
     return reward / risk
 
 
-# ==========================================
+# ============================================================
 # PERFORMANCE METRICS
-# ==========================================
+# ============================================================
 
 def max_drawdown(r_values):
     equity = 0.0
@@ -970,37 +764,26 @@ def max_drawdown(r_values):
 
 
 def profit_factor(r_values):
-    gross_profit = sum(
-        value for value in r_values if value > 0
-    )
-
-    gross_loss = abs(sum(
-        value for value in r_values if value < 0
-    ))
+    gross_profit = sum(v for v in r_values if v > 0)
+    gross_loss = abs(sum(v for v in r_values if v < 0))
 
     if gross_loss == 0:
-        return (
-            float("inf")
-            if gross_profit > 0
-            else 0.0
-        )
+        return float("inf") if gross_profit > 0 else 0.0
 
     return gross_profit / gross_loss
 
 
-# ==========================================
+# ============================================================
 # SINGLE SYMBOL BACKTEST
-# ==========================================
+# ============================================================
 
 def run_symbol_backtest(symbol, histories):
     m15 = histories["M15"]
-
     diagnostics = create_diagnostics()
 
     if len(m15) < MIN_HISTORY + 2:
         return [], diagnostics
 
-    # Validate full histories once.
     for timeframe in TIMEFRAMES:
         validation = validate_market_data(
             histories[timeframe],
@@ -1009,45 +792,34 @@ def run_symbol_backtest(symbol, histories):
 
         if not validation.valid:
             logger.error(
-                "%s %s: ma'lumot tekshiruvidan o'tmadi: %s",
+                "%s %s data validation failed: %s",
                 symbol,
                 timeframe,
                 "; ".join(validation.reasons[:5]),
             )
             return [], diagnostics
 
-    logger.info(
-        "%s: indikatorlar va market structure tayyorlanmoqda",
-        symbol,
-    )
+    logger.info("%s: indicators and structure preparing", symbol)
 
     caches = {
-        timeframe: TimeframeCache(histories[timeframe])
-        for timeframe in TIMEFRAMES
+        tf: TimeframeCache(histories[tf])
+        for tf in TIMEFRAMES
     }
 
     close_times = {
-        timeframe: candle_close_times(
-            histories[timeframe],
-            timeframe,
-        )
-        for timeframe in TIMEFRAMES
+        tf: candle_close_times(histories[tf], tf)
+        for tf in TIMEFRAMES
     }
 
     trades = []
     next_free_index = MIN_HISTORY - 1
 
-    for index in range(
-        MIN_HISTORY - 1,
-        len(m15) - 1,
-    ):
+    for index in range(MIN_HISTORY - 1, len(m15) - 1):
         if index < next_free_index:
             continue
 
         signal_close_time = close_times["M15"][index]
-
         indices = {}
-
         valid_history = True
 
         for timeframe in TIMEFRAMES:
@@ -1069,27 +841,15 @@ def run_symbol_backtest(symbol, histories):
 
         try:
             signal, hold_reason = analyze_cached_signal(
-                symbol,
-                caches,
-                indices,
+                symbol, caches, indices
             )
-
         except Exception:
             diagnostics["rejected_invalid"] += 1
-
-            logger.exception(
-                "%s index %s: signal tahlil xatosi",
-                symbol,
-                index,
-            )
-
+            logger.exception("%s index %s: signal analysis error", symbol, index)
             continue
 
         if signal is None:
-            record_hold(
-                diagnostics,
-                hold_reason,
-            )
+            record_hold(diagnostics, hold_reason)
             continue
 
         side = signal["side"]
@@ -1110,20 +870,18 @@ def run_symbol_backtest(symbol, histories):
         if levels is None:
             if rejection_reason == "entry_drift":
                 diagnostics["rejected_drift"] += 1
-
             elif rejection_reason == "invalid_rr":
                 diagnostics["rejected_rr"] += 1
-
             elif rejection_reason in (
                 "missing_levels",
                 "invalid_levels",
                 "invalid_risk",
             ):
                 diagnostics["rejected_levels"] += 1
-
             else:
                 diagnostics["rejected_invalid"] += 1
 
+            record_hold(diagnostics, rejection_reason)
             continue
 
         diagnostics["accepted_entries"] += 1
@@ -1143,7 +901,7 @@ def run_symbol_backtest(symbol, histories):
             side=side,
         )
 
-        if r_value is None:
+        if r_value is None or not math.isfinite(r_value):
             diagnostics["rejected_invalid"] += 1
             continue
 
@@ -1153,37 +911,27 @@ def run_symbol_backtest(symbol, histories):
             "symbol": symbol,
             "timeframe": "M15",
             "side": side,
-
             "signal_time": datetime.fromtimestamp(
                 m15[index].timestamp / 1000,
                 tz=timezone.utc,
             ).isoformat(),
-
             "entry_time": datetime.fromtimestamp(
                 entry_candle.timestamp / 1000,
                 tz=timezone.utc,
             ).isoformat(),
-
             "exit_time": datetime.fromtimestamp(
                 m15[exit_index].timestamp / 1000,
                 tz=timezone.utc,
             ).isoformat(),
-
             "reference_entry": levels["reference_entry"],
             "entry": levels["entry"],
-            "entry_drift_r": round(
-                levels["entry_drift_r"],
-                4,
-            ),
-
+            "entry_drift_r": round(levels["entry_drift_r"], 4),
             "stop_loss": levels["stop_loss"],
             "take_profit": levels["take_profit"],
             "exit_price": exit_result["exit_price"],
-
             "risk_reward": levels["risk_reward"],
             "outcome": exit_result["outcome"],
             "r_multiple": round(r_value, 4),
-
             "technical_score": signal["confidence"],
         })
 
@@ -1192,41 +940,30 @@ def run_symbol_backtest(symbol, histories):
     return trades, diagnostics
 
 
-# ==========================================
+# ============================================================
 # PARALLEL DATA LOADING
-# ==========================================
+# ============================================================
 
 def fetch_one(task):
     symbol, timeframe, limit = task
-
     candles = get_candles(
         symbol=symbol,
         timeframe=timeframe,
         limit=limit,
     )
-
     return symbol, timeframe, candles
 
 
 def load_all_histories():
     tasks = [
-        (
-            symbol,
-            timeframe,
-            HISTORY_LIMITS[timeframe],
-        )
+        (symbol, timeframe, HISTORY_LIMITS[timeframe])
         for symbol in SYMBOLS
         for timeframe in TIMEFRAMES
     ]
 
-    histories = {
-        symbol: {}
-        for symbol in SYMBOLS
-    }
+    histories = {symbol: {} for symbol in SYMBOLS}
 
-    logger.info(
-        "Tarixiy ma'lumotlar 5 parallel oqimda yuklanmoqda"
-    )
+    logger.info("Historical data loading with 5 workers")
 
     with ThreadPoolExecutor(max_workers=5) as executor:
         futures = {
@@ -1239,22 +976,16 @@ def load_all_histories():
 
             try:
                 result_symbol, result_tf, candles = future.result()
-
                 histories[result_symbol][result_tf] = candles
 
                 logger.info(
-                    "[DATA OK] %s %s: %s sham",
+                    "[DATA OK] %s %s: %s candles",
                     result_symbol,
                     result_tf,
                     len(candles),
                 )
-
             except Exception:
-                logger.exception(
-                    "[DATA ERROR] %s %s",
-                    symbol,
-                    timeframe,
-                )
+                logger.exception("[DATA ERROR] %s %s", symbol, timeframe)
 
     ready = {}
 
@@ -1262,17 +993,14 @@ def load_all_histories():
         if all(tf in data for tf in TIMEFRAMES):
             ready[symbol] = data
         else:
-            logger.error(
-                "%s: tarixiy ma'lumotlar to'liq emas",
-                symbol,
-            )
+            logger.error("%s: incomplete historical data", symbol)
 
     return ready
 
 
-# ==========================================
+# ============================================================
 # SAVE REPORTS
-# ==========================================
+# ============================================================
 
 def save_trades(trades):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -1296,16 +1024,8 @@ def save_trades(trades):
         "technical_score",
     ]
 
-    with open(
-        OUTPUT_FILE,
-        "w",
-        newline="",
-        encoding="utf-8",
-    ) as file:
-        writer = csv.DictWriter(
-            file,
-            fieldnames=fields,
-        )
+    with open(OUTPUT_FILE, "w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=fields)
         writer.writeheader()
         writer.writerows(trades)
 
@@ -1326,39 +1046,20 @@ def save_diagnostics(all_diagnostics):
         "rejected_invalid",
     ]
 
-    with open(
-        DIAGNOSTICS_FILE,
-        "w",
-        newline="",
-        encoding="utf-8",
-    ) as file:
-        writer = csv.DictWriter(
-            file,
-            fieldnames=fields,
-        )
-
+    with open(DIAGNOSTICS_FILE, "w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=fields)
         writer.writeheader()
 
         for symbol, data in sorted(all_diagnostics.items()):
-            row = {
-                key: data[key]
-                for key in fields
-                if key != "symbol"
-            }
+            row = {key: data[key] for key in fields if key != "symbol"}
             row["symbol"] = symbol
             writer.writerow(row)
 
-    with open(
-        HOLD_REASONS_FILE,
-        "w",
-        newline="",
-        encoding="utf-8",
-    ) as file:
+    with open(HOLD_REASONS_FILE, "w", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(
             file,
             fieldnames=["symbol", "reason", "count"],
         )
-
         writer.writeheader()
 
         for symbol, data in sorted(all_diagnostics.items()):
@@ -1370,13 +1071,13 @@ def save_diagnostics(all_diagnostics):
                 })
 
 
-# ==========================================
+# ============================================================
 # REPORT
-# ==========================================
+# ============================================================
 
 def print_report(trades):
     print("\n" + "=" * 76)
-    print("V6 OPTIMIZED HISTORICAL BACKTEST")
+    print("V6 HISTORICAL BACKTEST")
     print("=" * 76)
 
     if not trades:
@@ -1386,57 +1087,30 @@ def print_report(trades):
     groups = {}
 
     for trade in trades:
-        groups.setdefault(
-            trade["symbol"],
-            [],
-        ).append(trade)
+        groups.setdefault(trade["symbol"], []).append(trade)
 
     print(
         f"{'SYMBOL':<10} {'N':>5} {'WIN%':>9} "
         f"{'TP':>5} {'SL':>5} {'TIME':>5} "
         f"{'TOTAL R':>10} {'MAX DD':>9}"
     )
-
     print("-" * 76)
 
     for symbol, items in sorted(groups.items()):
-        values = [
-            item["r_multiple"]
-            for item in items
-        ]
-
-        wins = sum(
-            item["outcome"] == "TP"
-            for item in items
-        )
-
-        losses = sum(
-            item["outcome"] == "SL"
-            for item in items
-        )
-
-        timeouts = sum(
-            item["outcome"] == "TIMEOUT"
-            for item in items
-        )
+        values = [item["r_multiple"] for item in items]
+        wins = sum(item["outcome"] == "TP" for item in items)
+        losses = sum(item["outcome"] == "SL" for item in items)
+        timeouts = sum(item["outcome"] == "TIMEOUT" for item in items)
 
         print(
             f"{symbol:<10} {len(items):>5} "
             f"{wins / len(items) * 100:>8.2f}% "
             f"{wins:>5} {losses:>5} {timeouts:>5} "
-            f"{sum(values):>10.2f} "
-            f"{max_drawdown(values):>9.2f}"
+            f"{sum(values):>10.2f} {max_drawdown(values):>9.2f}"
         )
 
-    values = [
-        item["r_multiple"]
-        for item in trades
-    ]
-
-    wins = sum(
-        item["outcome"] == "TP"
-        for item in trades
-    )
+    values = [item["r_multiple"] for item in trades]
+    wins = sum(item["outcome"] == "TP" for item in trades)
 
     print("-" * 76)
     print("JAMI SAVDOLAR:", len(trades))
@@ -1447,20 +1121,20 @@ def print_report(trades):
     print("PROFIT FACTOR:", f"{profit_factor(values):.3f}")
     print("-" * 76)
     print("Spread, komissiya va slippage hisobga olinmagan.")
-    print("Natija foyda kafolati emas.")
+    print("Tarixiy natija foyda kafolati emas.")
     print("CSV:", OUTPUT_FILE)
     print("=" * 76)
 
 
 def print_diagnostics(all_diagnostics):
     print("\n" + "=" * 76)
-    print("V6 SIGNAL DIAGNOSTIKASI")
+    print("V6 SIGNAL DIAGNOSTICS")
     print("=" * 76)
 
     for symbol, data in sorted(all_diagnostics.items()):
         print(f"\n[{symbol}]")
 
-        for key, label in (
+        labels = (
             ("analysis_count", "Tahlil qilingan shamlar"),
             ("hold_count", "HOLD"),
             ("buy_signals", "BUY"),
@@ -1470,24 +1144,25 @@ def print_diagnostics(all_diagnostics):
             ("rejected_levels", "SL/TP yoki risk sabab rad"),
             ("rejected_rr", "RR sabab rad"),
             ("rejected_invalid", "Boshqa xatolar"),
-        ):
+        )
+
+        for key, label in labels:
             print(f"{label}: {data[key]}")
 
         if data["hold_reasons"]:
             print("HOLD SABABLARI:")
-
             for reason, count in data["hold_reasons"].most_common(10):
                 print(f"  {count:>5}x | {reason}")
 
     print("=" * 76)
 
 
-# ==========================================
+# ============================================================
 # MAIN
-# ==========================================
+# ============================================================
 
 def main():
-    logger.info("V6 OPTIMIZED BACKTEST BOSHLANDI")
+    logger.info("V6 BACKTEST STARTED")
 
     all_trades = []
     all_diagnostics = {}
@@ -1511,7 +1186,7 @@ def main():
             all_diagnostics[symbol] = diagnostics
 
             logger.info(
-                "[BACKTEST OK] %s: %s savdo | BUY %s | SELL %s | HOLD %s",
+                "[BACKTEST OK] %s: %s trades | BUY %s | SELL %s | HOLD %s",
                 symbol,
                 len(trades),
                 diagnostics["buy_signals"],
@@ -1529,7 +1204,7 @@ def main():
     print_report(all_trades)
     print_diagnostics(all_diagnostics)
 
-    logger.info("V6 OPTIMIZED BACKTEST YAKUNLANDI")
+    logger.info("V6 BACKTEST FINISHED")
 
 
 if __name__ == "__main__":
