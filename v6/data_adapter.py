@@ -23,7 +23,7 @@ from .config import SYMBOLS, TIMEFRAMES
 BINANCE_URL = "https://data-api.binance.vision/api/v3/klines"
 
 MIN_CANDLES = 220
-MAX_CANDLES = 7000
+MAX_CANDLES = 10000
 BINANCE_MAX_PAGE = 1000
 
 REQUEST_TIMEOUT = 30
