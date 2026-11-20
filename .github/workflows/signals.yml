@@ -3,8 +3,6 @@ name: Forex M30 Signals
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "*/5 * * * *"
 
 permissions:
   contents: write
@@ -16,6 +14,7 @@ concurrency:
 jobs:
   scan:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -25,18 +24,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Restore signal state
-        uses: actions/cache/restore@v4
-        with:
-          path: .signal_state.json
-          key: forex-signal-state-${{ github.run_id }}
-          restore-keys: |
-            forex-signal-state-
-
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Scan markets and send signals 
+      - name: Scan markets
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -44,11 +35,3 @@ jobs:
           CLOUDFLARE_WORKER_URL: ${{ secrets.CLOUDFLARE_WORKER_URL }}
           WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
         run: python bot.py
-
-      - name: Save signal state
-        if: always() && hashFiles('.signal_state.json') != ''
-        uses: actions/cache/save@v4
-        with:
-          path: .signal_state.json
-          key: forex-signal-state-${{ github.run_id }}
-          
