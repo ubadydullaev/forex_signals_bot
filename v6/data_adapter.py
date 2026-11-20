@@ -194,6 +194,7 @@ def _calculate_lookback_days(timeframe, limit):
 # CANDLE GAP INSPECTION
 # =========================================================
 
+
 def _inspect_candle_gaps(candles, timeframe, source):
 
     if len(candles) < 2:
@@ -228,6 +229,7 @@ def _inspect_candle_gaps(candles, timeframe, source):
             round(difference / duration_ms) - 1,
         )
 
+        # Binance 24/7 ishlaydi: barcha uzilishlar qayd etiladi.
         if source == "binance_spot":
 
             gaps.append({
@@ -238,8 +240,6 @@ def _inspect_candle_gaps(candles, timeframe, source):
 
             continue
 
-        # Forex/CFD uchun dam olish kunlarini
-        # taxminiy hisobdan chiqaramiz.
         previous_dt = datetime.fromtimestamp(
             previous.timestamp / 1000,
             tz=timezone.utc,
@@ -250,31 +250,28 @@ def _inspect_candle_gaps(candles, timeframe, source):
             tz=timezone.utc,
         )
 
-        expected_weekday_slots = 0
+        previous_day = previous_dt.weekday()
+        current_day = current_dt.weekday()
 
-        cursor = previous.timestamp + duration_ms
+        # Dukascopy dam olish kunlari va juma-yakshanba
+        # oralig'idagi tabiiy tanaffuslarni o'tkazib yuboramiz.
+        weekend_transition = (
+            previous_day == 4 and current_day in (5, 6, 0)
+        ) or (
+            previous_day in (5, 6)
+        ) or (
+            current_day in (5, 6)
+        )
 
-        while cursor < current.timestamp:
+        if weekend_transition:
+            continue
 
-            cursor_dt = datetime.fromtimestamp(
-                cursor / 1000,
-                tz=timezone.utc,
-            )
-
-            if cursor_dt.weekday() < 5:
-                expected_weekday_slots += 1
-
-            cursor += duration_ms
-
-        # Dam olish kunlari hisobga olingandan keyin
-        # ham yetishmayotgan ish kunlari bo'lsa ogohlantiramiz.
-        if expected_weekday_slots > 1:
-
-            gaps.append({
-                "from": previous.timestamp,
-                "to": current.timestamp,
-                "missing_intervals": expected_weekday_slots,
-            })
+        # Ish kunlari orasidagi uzilishlar ogohlantiriladi.
+        gaps.append({
+            "from": previous.timestamp,
+            "to": current.timestamp,
+            "missing_intervals": missing,
+        })
 
     if gaps:
 
@@ -286,6 +283,7 @@ def _inspect_candle_gaps(candles, timeframe, source):
         )
 
     return gaps
+
 
 
 # =========================================================
