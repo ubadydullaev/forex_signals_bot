@@ -4,7 +4,6 @@ import html
 import json
 import logging
 import os
-from pathlib import Path
 
 import requests
 
@@ -51,6 +50,10 @@ logging.basicConfig(
 logger = logging.getLogger("V6")
 
 
+class StatePersistenceError(RuntimeError):
+    """Telegram yuborildi, ammo delivery state saqlanmadi."""
+
+
 # =========================================================
 # CONFIGURATION CHECK
 # =========================================================
@@ -58,30 +61,30 @@ logger = logging.getLogger("V6")
 def validate_environment():
     if not TELEGRAM_ENABLED:
         logger.info("Telegram dry-run rejimida.")
+        return
 
-    if TELEGRAM_ENABLED:
-        required = {
-            "TELEGRAM_BOT_TOKEN": BOT_TOKEN,
-            "TELEGRAM_CHAT_ID": ADMIN_ID,
-            "CLOUDFLARE_WORKER_URL": WORKER_URL,
-            "WEBHOOK_SECRET": WEBHOOK_SECRET,
-            "GITHUB_TOKEN": GITHUB_TOKEN,
-            "GITHUB_REPOSITORY": GITHUB_REPOSITORY,
-        }
+    required = {
+        "TELEGRAM_BOT_TOKEN": BOT_TOKEN,
+        "TELEGRAM_CHAT_ID": ADMIN_ID,
+        "CLOUDFLARE_WORKER_URL": WORKER_URL,
+        "WEBHOOK_SECRET": WEBHOOK_SECRET,
+        "GITHUB_TOKEN": GITHUB_TOKEN,
+        "GITHUB_REPOSITORY": GITHUB_REPOSITORY,
+    }
 
-        missing = [
-            name for name, value in required.items() if not value
-        ]
+    missing = [
+        name for name, value in required.items() if not value
+    ]
 
-        if missing:
-            raise RuntimeError(
-                "Kerakli GitHub Secrets/environment yo'q: "
-                + ", ".join(missing)
-            )
+    if missing:
+        raise RuntimeError(
+            "Kerakli GitHub Secrets/environment yo'q: "
+            + ", ".join(missing)
+        )
 
 
 # =========================================================
-# APPROVED USERS — V4 DELIVERY INTEGRATION
+# APPROVED USERS — LEGACY WORKER INTEGRATION
 # =========================================================
 
 def get_users():
@@ -98,7 +101,6 @@ def get_users():
     response.raise_for_status()
 
     payload = response.json()
-
     users = payload.get("users", [])
 
     if not isinstance(users, list):
@@ -112,7 +114,7 @@ def get_users():
 
 
 # =========================================================
-# TELEGRAM DELIVERY — V4 METHOD
+# TELEGRAM DELIVERY
 # =========================================================
 
 def send_telegram(chat_id, message):
@@ -226,7 +228,6 @@ def save_state(state, sha):
 
     result = response.json()
     content = result.get("content") or {}
-
     new_sha = content.get("sha")
 
     if not new_sha:
@@ -243,15 +244,15 @@ def save_state(state, sha):
 
 def make_signal_key(result, candles_by_timeframe):
     signal = result.signal
-
     m15_candles = candles_by_timeframe["M15"]
+
+    if not m15_candles:
+        raise RuntimeError("M15 shamlar ro'yxati bo'sh")
+
     candle_timestamp = m15_candles[-1].timestamp
 
     key = f"{signal.symbol}|{signal.timeframe}"
-
-    signature = (
-        f"{candle_timestamp}|{signal.side}"
-    )
+    signature = f"{candle_timestamp}|{signal.side}"
 
     return key, signature
 
@@ -259,7 +260,10 @@ def make_signal_key(result, candles_by_timeframe):
 def get_delivery_record(state, key, signature, users):
     old = state["signals"].get(key)
 
-    if isinstance(old, dict) and old.get("signature") == signature:
+    if (
+        isinstance(old, dict)
+        and old.get("signature") == signature
+    ):
         delivered = {
             str(user)
             for user in old.get("delivered_to", [])
@@ -422,14 +426,12 @@ def main():
     logger.info("Telegram: %s", TELEGRAM_ENABLED)
     logger.info("=" * 60)
 
-    
     if TELEGRAM_ENABLED:
         state, state_sha = load_state()
     else:
         state, state_sha = {"signals": {}}, None
 
     users = get_users() if TELEGRAM_ENABLED else []
-
 
     if TELEGRAM_ENABLED and not users:
         raise RuntimeError(
@@ -459,7 +461,11 @@ def main():
 
             if signal.side == "HOLD":
                 stats["hold"] += 1
-                logger.info("[HOLD] %s | %s", symbol, signal.reason)
+                logger.info(
+                    "[HOLD] %s | %s",
+                    symbol,
+                    signal.reason,
+                )
                 continue
 
             if signal.side == "BUY":
@@ -488,10 +494,7 @@ def main():
             message = format_signal(result)
 
             if not TELEGRAM_ENABLED:
-                logger.info(
-                    "[DRY RUN]\n%s",
-                    message,
-                )
+                logger.info("[DRY RUN]\n%s", message)
                 continue
 
             pending_users = [
@@ -510,26 +513,14 @@ def main():
                 continue
 
             for user in pending_users:
+                # Telegram xatosi faqat shu foydalanuvchiga tegishli.
                 try:
-                    send_telegram(user, message)
+                    sent = send_telegram(user, message)
 
-                    record["delivered_to"].append(user)
-
-                    state["signals"][key] = record
-
-                    state_sha = save_state(
-                        state,
-                        state_sha,
-                    )
-
-                    stats["sent"] += 1
-
-                    logger.info(
-                        "[SENT] %s %s -> %s",
-                        symbol,
-                        signal.side,
-                        user,
-                    )
+                    if not sent:
+                        raise RuntimeError(
+                            "Telegram yuborishni tasdiqlamadi"
+                        )
 
                 except Exception:
                     logger.exception(
@@ -537,6 +528,37 @@ def main():
                         symbol,
                         user,
                     )
+                    continue
+
+                # Yuborilgan xabarni state ichiga qayd etamiz.
+                record["delivered_to"].append(user)
+                state["signals"][key] = record
+
+                # State yozilmasa, boshqa signallarga o'tmaymiz.
+                try:
+                    state_sha = save_state(state, state_sha)
+                except Exception as exc:
+                    logger.exception(
+                        "[STATE SAVE ERROR] %s -> %s",
+                        symbol,
+                        user,
+                    )
+                    raise StatePersistenceError(
+                        "Telegram yuborildi, ammo GitHub state saqlanmadi. "
+                        "Takroriy signal xavfi sabab runner to'xtatildi."
+                    ) from exc
+
+                stats["sent"] += 1
+
+                logger.info(
+                    "[SENT] %s %s -> %s",
+                    symbol,
+                    signal.side,
+                    user,
+                )
+
+        except StatePersistenceError:
+            raise
 
         except Exception:
             stats["failed"] += 1
@@ -551,7 +573,12 @@ def main():
             list(state["signals"].items())[-MAX_STORED_SIGNALS:]
         )
 
-        state_sha = save_state(state, state_sha)
+        try:
+            state_sha = save_state(state, state_sha)
+        except Exception as exc:
+            raise StatePersistenceError(
+                "V6 state hajmini cheklash vaqtida saqlash xatosi"
+            ) from exc
 
     logger.info("=" * 60)
     logger.info("V6 YAKUNIY NATIJA: %s", stats)
