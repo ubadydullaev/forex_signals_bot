@@ -199,6 +199,37 @@ class TestV6Indicators(unittest.TestCase):
 
     # VWAP TESTS
 
+    def test_vwap_resets_at_session_boundary(self):
+        candles = self.make_candles(
+            [100, 110, 120, 130],
+            volumes=[1, 1, 1, 1],
+        )
+
+        result = vwap(
+            candles,
+            session_keys=["day1", "day1", "day2", "day2"],
+        )
+
+        self.assertAlmostEqual(result[0], 100.0)
+        self.assertAlmostEqual(result[1], 105.0)
+        self.assertAlmostEqual(result[2], 120.0)
+        self.assertAlmostEqual(result[3], 125.0)
+
+    def test_vwap_rejects_wrong_session_key_length(self):
+        candles = self.make_candles([100, 110, 120])
+
+        with self.assertRaises(ValueError):
+            vwap(candles, session_keys=["day1", "day2"])
+
+    def test_vwap_rejects_negative_volume(self):
+        candles = self.make_candles(
+            [100, 110],
+            volumes=[100, -10],
+        )
+
+        with self.assertRaises(ValueError):
+            vwap(candles)
+            
     def test_vwap_volume_weighting(self):
         candles = self.make_candles(
             [100, 110],
