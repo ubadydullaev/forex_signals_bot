@@ -34,6 +34,10 @@ class TestV6MarketStructure(unittest.TestCase):
 
         return candles
 
+    # ======================================
+    # SWING POINT TESTS
+    # ======================================
+
     def test_swing_high_detection(self):
         candles = self.make_candles([
             (10, 5, 8),
@@ -110,6 +114,13 @@ class TestV6MarketStructure(unittest.TestCase):
         with self.assertRaises(ValueError):
             find_swing_points(candles, left=2, right=0)
 
+        with self.assertRaises(ValueError):
+            find_swing_points(candles, left=True, right=2)
+
+    # ======================================
+    # TREND TESTS
+    # ======================================
+
     def test_bullish_trend_detection(self):
         swings = [
             SwingPoint(1, 1, 10, "HIGH"),
@@ -136,6 +147,19 @@ class TestV6MarketStructure(unittest.TestCase):
             "BEARISH",
         )
 
+    def test_ranging_trend_detection(self):
+        swings = [
+            SwingPoint(1, 1, 10, "HIGH"),
+            SwingPoint(2, 2, 5, "LOW"),
+            SwingPoint(3, 3, 12, "HIGH"),
+            SwingPoint(4, 4, 4, "LOW"),
+        ]
+
+        self.assertEqual(
+            detect_trend(swings),
+            "RANGING",
+        )
+
     def test_unknown_trend_with_insufficient_swings(self):
         swings = [
             SwingPoint(1, 1, 10, "HIGH"),
@@ -146,6 +170,10 @@ class TestV6MarketStructure(unittest.TestCase):
             detect_trend(swings),
             "UNKNOWN",
         )
+
+    # ======================================
+    # BOS AND CHOCH TESTS
+    # ======================================
 
     def test_bullish_bos_detection(self):
         candles = self.make_candles([
@@ -170,6 +198,57 @@ class TestV6MarketStructure(unittest.TestCase):
         self.assertEqual(events[0].direction, "BULLISH")
         self.assertEqual(events[0].level, 10)
 
+    def test_bearish_bos_detection(self):
+        candles = self.make_candles([
+            (12, 8, 10),
+            (11, 7, 9),
+            (12, 8, 10),
+            (9, 5, 6),
+        ])
+
+        swings = [
+            SwingPoint(1, candles[1].timestamp, 7, "LOW"),
+        ]
+
+        events = detect_structure_events(
+            candles,
+            swings,
+            right=1,
+        )
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].event, "BOS")
+        self.assertEqual(events[0].direction, "BEARISH")
+        self.assertEqual(events[0].level, 7)
+
+    def test_bearish_choch_after_bullish_structure(self):
+        candles = self.make_candles([
+            (9, 7, 8),
+            (11, 8, 9),
+            (9, 6, 8),
+            (12, 8, 11),
+            (8, 5, 6),
+        ])
+
+        swings = [
+            SwingPoint(1, candles[1].timestamp, 10, "HIGH"),
+            SwingPoint(2, candles[2].timestamp, 7, "LOW"),
+        ]
+
+        events = detect_structure_events(
+            candles,
+            swings,
+            right=1,
+        )
+
+        self.assertEqual(len(events), 2)
+
+        self.assertEqual(events[0].event, "BOS")
+        self.assertEqual(events[0].direction, "BULLISH")
+
+        self.assertEqual(events[1].event, "CHOCH")
+        self.assertEqual(events[1].direction, "BEARISH")
+
     def test_swing_cannot_break_before_confirmation(self):
         candles = self.make_candles([
             (9, 6, 8),
@@ -189,6 +268,31 @@ class TestV6MarketStructure(unittest.TestCase):
         )
 
         self.assertEqual(events, [])
+
+    def test_no_late_bos_if_level_was_already_crossed(self):
+        candles = self.make_candles([
+            (9, 6, 8),
+            (12, 7, 11),
+            (13, 8, 12),
+            (14, 9, 13),
+            (15, 10, 14),
+        ])
+
+        swings = [
+            SwingPoint(1, candles[1].timestamp, 10, "HIGH"),
+        ]
+
+        events = detect_structure_events(
+            candles,
+            swings,
+            right=2,
+        )
+
+        self.assertEqual(events, [])
+
+    # ======================================
+    # LIQUIDITY SWEEP TESTS
+    # ======================================
 
     def test_bearish_liquidity_sweep_detection(self):
         candles = self.make_candles([
@@ -211,6 +315,27 @@ class TestV6MarketStructure(unittest.TestCase):
         self.assertEqual(sweeps[0].direction, "BEARISH")
         self.assertEqual(sweeps[0].swept_level, 10)
 
+    def test_bullish_liquidity_sweep_detection(self):
+        candles = self.make_candles([
+            (12, 8, 10),
+            (11, 7, 9),
+            (10, 5, 8),
+        ])
+
+        swings = [
+            SwingPoint(0, candles[0].timestamp, 8, "LOW"),
+        ]
+
+        sweeps = detect_liquidity_sweeps(
+            candles,
+            swings,
+            right=1,
+        )
+
+        self.assertEqual(len(sweeps), 1)
+        self.assertEqual(sweeps[0].direction, "BULLISH")
+        self.assertEqual(sweeps[0].swept_level, 8)
+
     def test_same_liquidity_level_is_not_repeatedly_counted(self):
         candles = self.make_candles([
             (10, 6, 8),
@@ -231,6 +356,30 @@ class TestV6MarketStructure(unittest.TestCase):
         )
 
         self.assertEqual(len(sweeps), 1)
+
+    def test_broken_high_is_not_later_counted_as_sweep(self):
+        candles = self.make_candles([
+            (10, 6, 8),
+            (9, 5, 7),
+            (12, 8, 11),
+            (13, 7, 9),
+        ])
+
+        swings = [
+            SwingPoint(0, candles[0].timestamp, 10, "HIGH"),
+        ]
+
+        sweeps = detect_liquidity_sweeps(
+            candles,
+            swings,
+            right=1,
+        )
+
+        self.assertEqual(sweeps, [])
+
+    # ======================================
+    # SUPPORT AND RESISTANCE TESTS
+    # ======================================
 
     def test_support_and_resistance(self):
         candles = self.make_candles([
@@ -253,6 +402,24 @@ class TestV6MarketStructure(unittest.TestCase):
         self.assertEqual(levels["support"], 95)
         self.assertEqual(levels["resistance"], 110)
 
+    def test_no_support_or_resistance(self):
+        candles = self.make_candles([
+            (12, 7, 10),
+        ])
+
+        levels = get_support_resistance(
+            candles,
+            [],
+            current_price=10,
+        )
+
+        self.assertIsNone(levels["support"])
+        self.assertIsNone(levels["resistance"])
+
+    # ======================================
+    # COMPLETE ANALYSIS TESTS
+    # ======================================
+
     def test_empty_market_structure(self):
         result = analyze_market_structure([])
 
@@ -263,7 +430,39 @@ class TestV6MarketStructure(unittest.TestCase):
         self.assertIsNone(result["levels"]["support"])
         self.assertIsNone(result["levels"]["resistance"])
 
+    def test_complete_analysis_result_keys(self):
+        candles = self.make_candles([
+            (10, 5, 8),
+            (15, 7, 12),
+            (12, 6, 9),
+            (11, 5, 8),
+            (14, 7, 11),
+            (12, 6, 9),
+            (10, 4, 7),
+        ])
+
+        result = analyze_market_structure(
+            candles,
+            left=1,
+            right=1,
+        )
+
+        self.assertEqual(
+            set(result.keys()),
+            {
+                "trend",
+                "swings",
+                "events",
+                "liquidity_sweeps",
+                "levels",
+            },
+        )
+
+        self.assertIn(
+            result["trend"],
+            ("UNKNOWN", "BULLISH", "BEARISH", "RANGING"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
-      
