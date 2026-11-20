@@ -8,6 +8,105 @@ from v6 import data_adapter
 
 class TestV6DataAdapter(unittest.TestCase):
 
+    def test_dukascopy_weekend_gap_is_ignored(self):
+        from datetime import datetime, timezone
+
+        friday = int(
+            datetime(
+                2026, 11, 20, 20, 0,
+                tzinfo=timezone.utc
+            ).timestamp() * 1000
+        )
+
+        monday = int(
+            datetime(
+                2026, 11, 23, 8, 0,
+                tzinfo=timezone.utc
+            ).timestamp() * 1000
+        )
+
+        candles = [
+            data_adapter.Candle(
+                timestamp=friday,
+                open=2000,
+                high=2005,
+                low=1995,
+                close=2001,
+                volume=100,
+                is_closed=True,
+                source="dukascopy",
+            ),
+            data_adapter.Candle(
+                timestamp=monday,
+                open=2001,
+                high=2006,
+                low=1998,
+                close=2004,
+                volume=100,
+                is_closed=True,
+                source="dukascopy",
+            ),
+        ]
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+
+            gaps = data_adapter._inspect_candle_gaps(
+                candles,
+                "M15",
+                "dukascopy",
+            )
+
+        self.assertEqual(gaps, [])
+        self.assertEqual(len(caught), 0)
+
+    def test_dukascopy_weekday_gap_generates_warning(self):
+        from datetime import datetime, timezone
+
+        first = int(
+            datetime(
+                2026, 11, 17, 10, 0,
+                tzinfo=timezone.utc
+            ).timestamp() * 1000
+        )
+
+        second = first + 45 * 60 * 1000
+
+        candles = [
+            data_adapter.Candle(
+                timestamp=first,
+                open=2000,
+                high=2005,
+                low=1995,
+                close=2001,
+                volume=100,
+                is_closed=True,
+                source="dukascopy",
+            ),
+            data_adapter.Candle(
+                timestamp=second,
+                open=2001,
+                high=2006,
+                low=1998,
+                close=2004,
+                volume=100,
+                is_closed=True,
+                source="dukascopy",
+            ),
+        ]
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+
+            gaps = data_adapter._inspect_candle_gaps(
+                candles,
+                "M15",
+                "dukascopy",
+            )
+
+        self.assertEqual(len(gaps), 1)
+        self.assertEqual(len(caught), 1)
+        
     def make_raw_candles(self, count=3):
         base_timestamp = 1700000000000
         duration = 15 * 60 * 1000
