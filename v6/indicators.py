@@ -491,21 +491,3 @@ def calculate_indicators(
         "vwap": vwap(candles),
         "supertrend": supertrend_result,
     }
-e for candle in candles]
-
-    macd_result = macd(closes)
-    adx_result = adx(candles)
-    supertrend_result = supertrend(candles)
-
-    return {
-        "ema_20": ema(closes, 20),
-        "ema_50": ema(closes, 50),
-        "ema_200": ema(closes, 200),
-        "rsi_14": rsi(closes, 14),
-        "atr_14": atr(candles, 14),
-        "macd": macd_result,
-        "adx": adx_result,
-        "vwap": vwap(candles),
-        "supertrend": supertrend_result,
-      }
-      
