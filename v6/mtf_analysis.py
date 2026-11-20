@@ -7,10 +7,6 @@ from .indicators import calculate_indicators
 from .market_structure import analyze_market_structure
 
 
-# ==========================================
-# V6 MULTI-TIMEFRAME ANALYSIS
-# ==========================================
-
 TIMEFRAME_WEIGHTS = {
     "D1": 3.0,
     "H4": 3.0,
@@ -18,6 +14,7 @@ TIMEFRAME_WEIGHTS = {
     "M30": 1.0,
     "M15": 0.5,
 }
+
 ALIGNMENT_TIMEFRAMES = ("D1", "H4", "H1", "M30")
 DIRECTIONAL_TRENDS = ("BULLISH", "BEARISH")
 
@@ -50,11 +47,6 @@ def analyze_single_timeframe(
     candles: list[Candle],
     timeframe: str,
 ) -> dict:
-    """
-    EMA 20/50/200 establishes direction.
-    Supertrend must confirm the same direction.
-    Structure provides additional market context.
-    """
 
     if not candles:
         return _empty_timeframe_result(timeframe)
@@ -80,7 +72,6 @@ def analyze_single_timeframe(
     supertrend_confirmed = False
     reasons = []
 
-    # 1. EMA direction
     if all(value is not None for value in (ema20, ema50, ema200)):
         if ema20 > ema50 > ema200:
             ema_trend = "BULLISH"
@@ -96,7 +87,6 @@ def analyze_single_timeframe(
     else:
         reasons.append("EMA data incomplete")
 
-    # 2. Supertrend confirmation
     if supertrend_direction is None:
         reasons.append("Supertrend unavailable")
 
@@ -126,13 +116,11 @@ def analyze_single_timeframe(
     if ema_trend == "RANGING":
         trend = "RANGING"
 
-    # 3. Market structure context
     if structure_trend != "UNKNOWN":
         reasons.append(f"Market structure: {structure_trend}")
     else:
         reasons.append("Market structure unavailable")
 
-    # 4. ADX strength
     strength = (
         min(max(adx_value, 0.0), 100.0)
         if adx_value is not None
@@ -158,16 +146,6 @@ def analyze_single_timeframe(
 def analyze_mtf(
     candles_by_timeframe: dict[str, list[Candle]],
 ) -> dict:
-    """
-    Combine configured timeframe analyses.
-
-    D1, H4 and H1 must agree.
-    M30 must confirm the same direction.
-    M15 is checked separately by signal_engine.py.
-
-    Alignment uses total configured weight.
-    UNKNOWN and RANGING do not inflate alignment.
-    """
 
     timeframe_results = {}
 
@@ -184,7 +162,6 @@ def analyze_mtf(
     available_weight = 0.0
 
     total_weight = sum(
-        total_weight = sum(
         TIMEFRAME_WEIGHTS[timeframe]
         for timeframe in ALIGNMENT_TIMEFRAMES
     )
@@ -203,3 +180,47 @@ def analyze_mtf(
             bullish_score += weight
         else:
             bearish_score += weight
+
+    if bullish_score == 0 and bearish_score == 0:
+        overall_trend = "UNKNOWN"
+        alignment = 0.0
+
+    elif bullish_score > bearish_score:
+        overall_trend = "BULLISH"
+        alignment = bullish_score / total_weight * 100.0
+
+    elif bearish_score > bullish_score:
+        overall_trend = "BEARISH"
+        alignment = bearish_score / total_weight * 100.0
+
+    else:
+        overall_trend = "RANGING"
+        alignment = max(
+            bullish_score,
+            bearish_score,
+        ) / total_weight * 100.0
+
+    higher_confirmation = (
+        overall_trend in DIRECTIONAL_TRENDS
+        and all(
+            timeframe_results[timeframe]["trend"] == overall_trend
+            for timeframe in ("D1", "H4", "H1")
+        )
+    )
+
+    lower_confirmation = (
+        overall_trend in DIRECTIONAL_TRENDS
+        and timeframe_results["M30"]["trend"] == overall_trend
+    )
+
+    return {
+        "overall_trend": overall_trend,
+        "alignment_percent": round(alignment, 2),
+        "total_weight": total_weight,
+        "available_weight": available_weight,
+        "bullish_score": bullish_score,
+        "bearish_score": bearish_score,
+        "higher_confirmation": higher_confirmation,
+        "lower_confirmation": lower_confirmation,
+        "timeframe_results": timeframe_results,
+    }
