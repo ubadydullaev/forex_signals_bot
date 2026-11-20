@@ -35,10 +35,13 @@ jobs:
       - name: Check V6 syntax
         run: python -m compileall -q v6
 
-      - name: Run V6 backtest
+      - name: Run V6 historical backtest
         run: python -m v6.backtest
 
-      - name: Upload V6 report
+      - name: Run V6 cost analysis
+        run: python -m v6.cost_report
+
+      - name: Upload V6 reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -46,4 +49,3 @@ jobs:
           path: backtest_results/
           if-no-files-found: warn
           retention-days: 14
-          
