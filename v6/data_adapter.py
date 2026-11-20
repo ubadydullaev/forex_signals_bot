@@ -277,9 +277,7 @@ def _build_candles(raw_candles, timeframe, source, limit):
             low = float(item["low"])
             close = float(item["close"])
 
-            volume = float(
-                item.get("volume", 0.0)
-            )
+            volume = float(item["volume"])
 
             if not _valid_prices(
                 open_price,
