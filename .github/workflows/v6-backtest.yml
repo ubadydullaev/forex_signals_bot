@@ -1,4 +1,3 @@
-
 name: V6 Historical Backtest
 
 on:
@@ -46,6 +45,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: v6-backtest-results
-          path: backtest_results/
+          path: |
+            backtest_results/
+            v6/broker_costs.csv
           if-no-files-found: warn
-          retention-days: 14
+          retention-days: 30
