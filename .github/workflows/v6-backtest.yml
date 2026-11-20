@@ -1,0 +1,49 @@
+
+name: V6 Historical Backtest
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Dukascopy
+        run: npm install --no-save dukascopy-node
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Check V6 syntax
+        run: python -m compileall -q v6
+
+      - name: Run V6 backtest
+        run: python -m v6.backtest
+
+      - name: Upload V6 report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v6-backtest-results
+          path: backtest_results/v6_trades.csv
+          if-no-files-found: warn
+          retention-days: 14
+          
