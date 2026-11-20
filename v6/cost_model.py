@@ -1,4 +1,13 @@
+
 import math
+
+# Har bir savdoga qo'shiladigan taxminiy slippage:
+# BASE = 0.01R, HIGH = 0.03R.
+# Bular brokerning real qiymatlari emas.
+SLIPPAGE_STRESS = {
+    "SLIPPAGE_BASE": 0.01,
+    "SLIPPAGE_HIGH": 0.03,
+}
 
 COST_SCENARIOS = {
     "NO_COST": 0.00,
@@ -8,11 +17,12 @@ COST_SCENARIOS = {
 
 
 def calculate_cost_r(scenario_name):
-    if scenario_name not in COST_SCENARIOS:
-        raise ValueError(
-            f"Noma'lum ssenariy: {scenario_name}"
-        )
-    return COST_SCENARIOS[scenario_name]
+    scenarios = {**COST_SCENARIOS, **SLIPPAGE_STRESS}
+
+    if scenario_name not in scenarios:
+        raise ValueError(f"Noma'lum ssenariy: {scenario_name}")
+
+    return scenarios[scenario_name]
 
 
 def calculate_trade_cost_r(
@@ -56,12 +66,8 @@ def calculate_results(gross_values, cost_values):
     wins = sum(value > 0 for value in net_values)
     losses = sum(value < 0 for value in net_values)
 
-    gross_profit = sum(
-        value for value in net_values if value > 0
-    )
-    gross_loss = abs(sum(
-        value for value in net_values if value < 0
-    ))
+    gross_profit = sum(v for v in net_values if v > 0)
+    gross_loss = abs(sum(v for v in net_values if v < 0))
 
     if gross_loss:
         pf = gross_profit / gross_loss
@@ -80,17 +86,11 @@ def calculate_results(gross_values, cost_values):
     return {
         "trades": count,
         "total_net_r": sum(net_values),
-        "average_net_r": (
-            sum(net_values) / count if count else 0.0
-        ),
-        "win_rate": (
-            wins / count * 100 if count else 0.0
-        ),
+        "average_net_r": sum(net_values) / count if count else 0.0,
+        "win_rate": wins / count * 100 if count else 0.0,
         "profit_factor": pf,
         "max_drawdown_r": max_dd,
-        "average_cost_r": (
-            sum(cost_values) / count if count else 0.0
-        ),
+        "average_cost_r": sum(cost_values) / count if count else 0.0,
         "wins": wins,
         "losses": losses,
     }
@@ -99,7 +99,7 @@ def calculate_results(gross_values, cost_values):
 def calculate_scenario_results(gross_values):
     results = {}
 
-    for name, cost in COST_SCENARIOS.items():
+    for name, cost in {**COST_SCENARIOS, **SLIPPAGE_STRESS}.items():
         results[name] = calculate_results(
             gross_values,
             [cost] * len(gross_values),
@@ -109,10 +109,7 @@ def calculate_scenario_results(gross_values):
     return results
 
 
-def calculate_break_even_price_cost(
-    gross_values,
-    risk_distances,
-):
+def calculate_break_even_price_cost(gross_values, risk_distances):
     if len(gross_values) != len(risk_distances):
         raise ValueError("Savdo va risk soni mos emas.")
 
@@ -130,9 +127,7 @@ def calculate_break_even_price_cost(
     if total_gross <= 0:
         return None
 
-    denominator = sum(
-        1 / risk for risk in risk_distances
-    )
+    denominator = sum(1 / risk for risk in risk_distances)
 
     if denominator <= 0:
         return None
