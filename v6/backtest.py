@@ -13,6 +13,7 @@ from .signal_engine import analyze_symbol
 HISTORY_LIMIT = 1000
 MIN_HISTORY = 200
 MAX_HOLD_BARS = 100
+MAX_ENTRY_DRIFT_R = 0.25
 
 OUTPUT_DIR = "backtest_results"
 OUTPUT_FILE = os.path.join(OUTPUT_DIR, "v6_trades.csv")
@@ -29,20 +30,69 @@ def candle_close_times(candles, timeframe):
     return [c.timestamp + duration for c in candles]
 
 
-def get_closed_history(
-    histories,
-    close_times,
-    signal_close_time,
-):
+def get_closed_history(histories, close_times, signal_close_time):
     result = {}
 
     for timeframe in TIMEFRAMES:
-        times = close_times[timeframe]
-        count = bisect_right(times, signal_close_time)
-
+        count = bisect_right(
+            close_times[timeframe],
+            signal_close_time,
+        )
         result[timeframe] = histories[timeframe][:count]
 
     return result
+
+
+def build_execution_levels(signal, actual_entry):
+    """
+    Signal shamidagi risk masofasini saqlab,
+    keyingi sham ochilishiga mos SL va TP hisoblaydi.
+    """
+
+    if signal.entry is None or signal.stop_loss is None:
+        return None
+
+    reference_entry = float(signal.entry)
+    original_sl = float(signal.stop_loss)
+
+    risk_distance = abs(reference_entry - original_sl)
+
+    if risk_distance <= 0:
+        return None
+
+    entry_drift = abs(actual_entry - reference_entry)
+    drift_r = entry_drift / risk_distance
+
+    # Narx signal chiqqan joydan juda uzoqlashgan bo'lsa, kirmaymiz.
+    if drift_r > MAX_ENTRY_DRIFT_R:
+        return None
+
+    rr = signal.risk_reward or 1.5
+    rr = float(rr)
+
+    if rr < 1.0:
+        return None
+
+    if signal.side == "BUY":
+        stop_loss = actual_entry - risk_distance
+        take_profit = actual_entry + risk_distance * rr
+
+    elif signal.side == "SELL":
+        stop_loss = actual_entry + risk_distance
+        take_profit = actual_entry - risk_distance * rr
+
+    else:
+        return None
+
+    return {
+        "reference_entry": reference_entry,
+        "entry": actual_entry,
+        "stop_loss": stop_loss,
+        "take_profit": take_profit,
+        "risk_distance": risk_distance,
+        "risk_reward": rr,
+        "entry_drift_r": drift_r,
+    }
 
 
 def calculate_exit(
@@ -67,7 +117,7 @@ def calculate_exit(
             hit_sl = candle.high >= stop_loss
             hit_tp = candle.low <= take_profit
 
-        # Bir shamda ikkalasi tegsa, SL birinchi deb olinadi.
+        # Ikkalasi bir shamda tegsa, konservativ hisobda SL olinadi.
         if hit_sl:
             return {
                 "outcome": "SL",
@@ -117,8 +167,8 @@ def max_drawdown(r_values):
 
 
 def profit_factor(r_values):
-    gross_profit = sum(value for value in r_values if value > 0)
-    gross_loss = abs(sum(value for value in r_values if value < 0))
+    gross_profit = sum(v for v in r_values if v > 0)
+    gross_loss = abs(sum(v for v in r_values if v < 0))
 
     if gross_loss == 0:
         return float("inf") if gross_profit > 0 else 0.0
@@ -158,8 +208,8 @@ def run_symbol_backtest(symbol, histories):
         )
 
         if any(
-            len(closed_history[timeframe]) < MIN_HISTORY
-            for timeframe in TIMEFRAMES
+            len(closed_history[tf]) < MIN_HISTORY
+            for tf in TIMEFRAMES
         ):
             continue
 
@@ -181,39 +231,34 @@ def run_symbol_backtest(symbol, histories):
         if signal.side not in ("BUY", "SELL"):
             continue
 
-        if (
-            signal.stop_loss is None
-            or signal.take_profit is None
-        ):
+        if signal.stop_loss is None or signal.entry is None:
             continue
 
-        # Signal yopilgandan keyingi M15 sham ochilishida kirish.
+        # Signal yopilgandan keyingi sham ochilishida kirish.
         entry_index = index + 1
         entry_candle = m15[entry_index]
-        entry = float(entry_candle.open)
+        actual_entry = float(entry_candle.open)
 
-        stop_loss = float(signal.stop_loss)
-        take_profit = float(signal.take_profit)
+        levels = build_execution_levels(
+            signal=signal,
+            actual_entry=actual_entry,
+        )
 
-        if signal.side == "BUY":
-            if not stop_loss < entry < take_profit:
-                continue
-        else:
-            if not take_profit < entry < stop_loss:
-                continue
+        if levels is None:
+            continue
 
         exit_result = calculate_exit(
             candles=m15,
             start_index=entry_index,
             side=signal.side,
-            stop_loss=stop_loss,
-            take_profit=take_profit,
+            stop_loss=levels["stop_loss"],
+            take_profit=levels["take_profit"],
         )
 
         r_value = calculate_r(
-            entry=entry,
+            entry=levels["entry"],
             exit_price=exit_result["exit_price"],
-            stop_loss=stop_loss,
+            stop_loss=levels["stop_loss"],
             side=signal.side,
         )
 
@@ -238,10 +283,13 @@ def run_symbol_backtest(symbol, histories):
                 m15[exit_index].timestamp / 1000,
                 tz=timezone.utc,
             ).isoformat(),
-            "entry": entry,
-            "stop_loss": stop_loss,
-            "take_profit": take_profit,
+            "reference_entry": levels["reference_entry"],
+            "entry": levels["entry"],
+            "entry_drift_r": round(levels["entry_drift_r"], 4),
+            "stop_loss": levels["stop_loss"],
+            "take_profit": levels["take_profit"],
             "exit_price": exit_result["exit_price"],
+            "risk_reward": levels["risk_reward"],
             "outcome": exit_result["outcome"],
             "r_multiple": round(r_value, 4),
             "technical_score": signal.confidence,
@@ -262,10 +310,13 @@ def save_trades(trades):
         "signal_time",
         "entry_time",
         "exit_time",
+        "reference_entry",
         "entry",
+        "entry_drift_r",
         "stop_loss",
         "take_profit",
         "exit_price",
+        "risk_reward",
         "outcome",
         "r_multiple",
         "technical_score",
@@ -283,26 +334,26 @@ def save_trades(trades):
 
 
 def print_report(trades):
-    print("\n" + "=" * 72)
+    print("\n" + "=" * 76)
     print("V6 TARIXIY BACKTEST HISOBOTI")
-    print("=" * 72)
+    print("=" * 76)
 
     if not trades:
-        print("Hozircha tasdiqlangan savdolar topilmadi.")
+        print("Tasdiqlangan savdolar topilmadi.")
+        print("CSV:", OUTPUT_FILE)
         return
 
     groups = {}
 
     for trade in trades:
-        key = trade["symbol"]
-        groups.setdefault(key, []).append(trade)
+        groups.setdefault(trade["symbol"], []).append(trade)
 
     print(
         f"{'SYMBOL':<10} {'N':>5} {'WIN%':>9} "
         f"{'TP':>5} {'SL':>5} {'TIME':>5} "
         f"{'TOTAL R':>10} {'MAX DD':>9}"
     )
-    print("-" * 72)
+    print("-" * 76)
 
     for symbol, items in sorted(groups.items()):
         values = [item["r_multiple"] for item in items]
@@ -323,18 +374,18 @@ def print_report(trades):
     values = [item["r_multiple"] for item in trades]
     wins = sum(item["outcome"] == "TP" for item in trades)
 
-    print("-" * 72)
+    print("-" * 76)
     print("JAMI SAVDOLAR:", len(trades))
     print("WIN RATE:", f"{wins / len(trades) * 100:.2f}%")
     print("JAMI R:", f"{sum(values):.2f}")
     print("O'RTACHA R:", f"{sum(values) / len(values):.3f}")
     print("MAX DRAWDOWN:", f"{max_drawdown(values):.2f}R")
     print("PROFIT FACTOR:", f"{profit_factor(values):.3f}")
-    print("-" * 72)
-    print("Eslatma: spread, komissiya va slippage hali hisoblanmagan.")
-    print("Bu natija foyda kafolati emas.")
+    print("-" * 76)
+    print("Spread, komissiya va slippage hisobga olinmagan.")
+    print("Natija foyda kafolati emas.")
     print("CSV:", OUTPUT_FILE)
-    print("=" * 72)
+    print("=" * 76)
 
 
 def main():
@@ -388,4 +439,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-  
