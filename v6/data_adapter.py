@@ -23,6 +23,7 @@ BINANCE_URL = "https://data-api.binance.vision/api/v3/klines"
 
 MIN_CANDLES = 220
 MAX_CANDLES = 1000
+
 REQUEST_TIMEOUT = 30
 DUKASCOPY_TIMEOUT = 240
 
@@ -44,31 +45,26 @@ TIMEFRAME_SETTINGS = {
         "interval": "15m",
         "dukascopy_tf": "m15",
         "duration_ms": 15 * 60 * 1000,
-        "lookback_days": 7,
     },
     "M30": {
         "interval": "30m",
         "dukascopy_tf": "m30",
         "duration_ms": 30 * 60 * 1000,
-        "lookback_days": 10,
     },
     "H1": {
         "interval": "1h",
         "dukascopy_tf": "h1",
         "duration_ms": 60 * 60 * 1000,
-        "lookback_days": 20,
     },
     "H4": {
         "interval": "4h",
         "dukascopy_tf": "h4",
         "duration_ms": 4 * 60 * 60 * 1000,
-        "lookback_days": 75,
     },
     "D1": {
         "interval": "1d",
         "dukascopy_tf": "d1",
         "duration_ms": 24 * 60 * 60 * 1000,
-        "lookback_days": 500,
     },
 }
 
@@ -76,7 +72,7 @@ TIMEFRAME_SETTINGS = {
 session = requests.Session()
 
 session.headers.update({
-    "User-Agent": "ForexSignalsBot-V6/2.0"
+    "User-Agent": "ForexSignalsBot-V6/3.0"
 })
 
 
@@ -85,6 +81,7 @@ session.headers.update({
 # =========================================================
 
 def _validate_request(symbol, timeframe, limit):
+
     if symbol not in SYMBOLS:
         raise ValueError(
             f"V6 uchun noma'lum instrument: {symbol}"
@@ -112,6 +109,7 @@ def _validate_request(symbol, timeframe, limit):
 # =========================================================
 
 def _valid_prices(open_price, high, low, close):
+
     values = (
         open_price,
         high,
@@ -138,6 +136,7 @@ def _valid_prices(open_price, high, low, close):
 
 
 def _valid_volume(volume):
+
     return (
         math.isfinite(volume)
         and volume >= 0
@@ -149,14 +148,14 @@ def _valid_volume(volume):
 # =========================================================
 
 def _valid_timestamp(timestamp):
+
     if isinstance(timestamp, bool):
         return False
 
     if not isinstance(timestamp, int):
         return False
 
-    # V6 timestamp formati Unix milliseconds.
-    # Seconds formatidagi timestamp qabul qilinmaydi.
+    # Unix milliseconds.
     if timestamp < 100_000_000_000:
         return False
 
@@ -164,14 +163,45 @@ def _valid_timestamp(timestamp):
 
 
 # =========================================================
+# DUKASCOPY LOOKBACK
+# =========================================================
+
+def _calculate_lookback_days(timeframe, limit):
+
+    duration_ms = TIMEFRAME_SETTINGS[timeframe][
+        "duration_ms"
+    ]
+
+    seconds_per_candle = duration_ms / 1000
+
+    # Forex bozori haftada taxminan 5 kun ishlaydi.
+    # Qo'shimcha zaxira yetishmay qolish ehtimolini kamaytiradi.
+    estimated_days = (
+        limit
+        * seconds_per_candle
+        / 86400
+        * (7 / 5)
+        * 1.35
+    )
+
+    return max(
+        7,
+        math.ceil(estimated_days) + 2,
+    )
+
+
+# =========================================================
 # CANDLE GAP INSPECTION
 # =========================================================
 
 def _inspect_candle_gaps(candles, timeframe, source):
+
     if len(candles) < 2:
         return []
 
-    duration_ms = TIMEFRAME_SETTINGS[timeframe]["duration_ms"]
+    duration_ms = TIMEFRAME_SETTINGS[timeframe][
+        "duration_ms"
+    ]
 
     gaps = []
 
@@ -179,6 +209,7 @@ def _inspect_candle_gaps(candles, timeframe, source):
         candles,
         candles[1:],
     ):
+
         difference = (
             current.timestamp - previous.timestamp
         )
@@ -192,53 +223,64 @@ def _inspect_candle_gaps(candles, timeframe, source):
         if difference <= duration_ms:
             continue
 
-        previous_date = datetime.fromtimestamp(
+        missing = max(
+            0,
+            round(difference / duration_ms) - 1,
+        )
+
+        if source == "binance_spot":
+
+            gaps.append({
+                "from": previous.timestamp,
+                "to": current.timestamp,
+                "missing_intervals": missing,
+            })
+
+            continue
+
+        # Forex/CFD uchun dam olish kunlarini
+        # taxminiy hisobdan chiqaramiz.
+        previous_dt = datetime.fromtimestamp(
             previous.timestamp / 1000,
             tz=timezone.utc,
         )
 
-        current_date = datetime.fromtimestamp(
+        current_dt = datetime.fromtimestamp(
             current.timestamp / 1000,
             tz=timezone.utc,
         )
 
-        # Binance kriptovalyuta bozori 24/7 ishlaydi.
-        # Dukascopy uchun dam olish kunlari hisobga olinadi.
-        if source == "binance_spot":
+        expected_weekday_slots = 0
+
+        cursor = previous.timestamp + duration_ms
+
+        while cursor < current.timestamp:
+
+            cursor_dt = datetime.fromtimestamp(
+                cursor / 1000,
+                tz=timezone.utc,
+            )
+
+            if cursor_dt.weekday() < 5:
+                expected_weekday_slots += 1
+
+            cursor += duration_ms
+
+        # Dam olish kunlari hisobga olingandan keyin
+        # ham yetishmayotgan ish kunlari bo'lsa ogohlantiramiz.
+        if expected_weekday_slots > 1:
+
             gaps.append({
                 "from": previous.timestamp,
                 "to": current.timestamp,
-                "missing_intervals": max(
-                    0,
-                    difference // duration_ms - 1,
-                ),
+                "missing_intervals": expected_weekday_slots,
             })
 
-        else:
-            same_day = (
-                previous_date.date()
-                == current_date.date()
-            )
-
-            weekend_transition = (
-                previous_date.weekday() == 4
-                and current_date.weekday() in (6, 0)
-            )
-
-            if same_day and not weekend_transition:
-                gaps.append({
-                    "from": previous.timestamp,
-                    "to": current.timestamp,
-                    "missing_intervals": max(
-                        0,
-                        difference // duration_ms - 1,
-                    ),
-                })
-
     if gaps:
+
         warnings.warn(
             f"{source} {timeframe}: "
-            f"{len(gaps)} ta sham oralig'ida uzilish aniqlandi. "
+            f"{len(gaps)} ta ehtimoliy sham uzilishi. "
             f"Birinchi uzilishlar: {gaps[:5]}",
             RuntimeWarning,
         )
@@ -251,7 +293,10 @@ def _inspect_candle_gaps(candles, timeframe, source):
 # =========================================================
 
 def _build_candles(raw_candles, timeframe, source, limit):
-    duration_ms = TIMEFRAME_SETTINGS[timeframe]["duration_ms"]
+
+    duration_ms = TIMEFRAME_SETTINGS[timeframe][
+        "duration_ms"
+    ]
 
     now_ms = int(
         datetime.now(timezone.utc).timestamp() * 1000
@@ -260,15 +305,15 @@ def _build_candles(raw_candles, timeframe, source, limit):
     candles_by_time = {}
 
     for item in raw_candles:
-        try:
-            raw_timestamp = item["timestamp"]
 
-            timestamp = int(raw_timestamp)
+        try:
+
+            timestamp = int(item["timestamp"])
 
             if not _valid_timestamp(timestamp):
                 continue
 
-            # Hali yopilmagan shamlarni qabul qilmaymiz.
+            # Faqat to'liq yopilgan shamlar.
             if timestamp + duration_ms > now_ms:
                 continue
 
@@ -276,7 +321,6 @@ def _build_candles(raw_candles, timeframe, source, limit):
             high = float(item["high"])
             low = float(item["low"])
             close = float(item["close"])
-
             volume = float(item["volume"])
 
             if not _valid_prices(
@@ -301,16 +345,14 @@ def _build_candles(raw_candles, timeframe, source, limit):
                 source=source,
             )
 
-            # Bir timestamp uchun ikki xil sham
-            # kelgan bo'lsa, ma'lumotni rad etamiz.
             if timestamp in candles_by_time:
+
                 previous = candles_by_time[timestamp]
 
                 if previous != candle:
                     raise RuntimeError(
                         f"{source} {timeframe}: "
-                        f"bir timestamp uchun qarama-qarshi "
-                        f"ma'lumot topildi: {timestamp}"
+                        f"qarama-qarshi duplicate: {timestamp}"
                     )
 
                 continue
@@ -334,21 +376,22 @@ def _build_candles(raw_candles, timeframe, source, limit):
     )
 
     if len(candles) < MIN_CANDLES:
+
         raise RuntimeError(
             f"{source} {timeframe}: "
             f"yopilgan shamlar yetarli emas: "
             f"{len(candles)}/{MIN_CANDLES}"
         )
 
-    # Vaqt ketma-ketligini tekshirish.
     for previous, current in zip(
         candles,
         candles[1:],
     ):
+
         if current.timestamp <= previous.timestamp:
             raise RuntimeError(
                 f"{source} {timeframe}: "
-                "shamlar timestamp tartibi buzilgan"
+                "shamlar tartibi buzilgan"
             )
 
     _inspect_candle_gaps(
@@ -365,7 +408,9 @@ def _build_candles(raw_candles, timeframe, source, limit):
             "yakuniy shamlar soni yetarli emas"
         )
 
-    if not all(candle.is_closed for candle in result):
+    if not all(
+        candle.is_closed for candle in result
+    ):
         raise RuntimeError(
             f"{source} {timeframe}: "
             "yopilmagan sham aniqlandi"
@@ -379,6 +424,7 @@ def _build_candles(raw_candles, timeframe, source, limit):
 # =========================================================
 
 def _fetch_binance(symbol, timeframe, limit):
+
     binance_symbol = BINANCE_SYMBOLS.get(symbol)
 
     if not binance_symbol:
@@ -386,33 +432,48 @@ def _fetch_binance(symbol, timeframe, limit):
             f"Binance instrument kodi topilmadi: {symbol}"
         )
 
-    interval = TIMEFRAME_SETTINGS[timeframe]["interval"]
+    settings = TIMEFRAME_SETTINGS[timeframe]
+
+    now_ms = int(
+        datetime.now(timezone.utc).timestamp() * 1000
+    )
+
+    duration_ms = settings["duration_ms"]
+
+    # Oxirgi ochiq shamni so'rov chegarasidan chiqaramiz.
+    end_time = now_ms - duration_ms
 
     try:
+
         response = session.get(
             BINANCE_URL,
             params={
                 "symbol": binance_symbol,
-                "interval": interval,
+                "interval": settings["interval"],
                 "limit": limit,
+                "endTime": end_time,
             },
             timeout=REQUEST_TIMEOUT,
         )
 
         response.raise_for_status()
+
         raw_data = response.json()
 
     except requests.RequestException as error:
+
         raise RuntimeError(
-            f"Binance bilan ulanishda xato: {error}"
+            f"Binance ulanish xatosi: {error}"
         ) from error
 
     except ValueError as error:
+
         raise RuntimeError(
             "Binance JSON javobini o'qib bo'lmadi"
         ) from error
 
     if not isinstance(raw_data, list):
+
         raise RuntimeError(
             "Binance noto'g'ri ma'lumot qaytardi"
         )
@@ -420,6 +481,7 @@ def _fetch_binance(symbol, timeframe, limit):
     raw_candles = []
 
     for item in raw_data:
+
         if not isinstance(item, (list, tuple)):
             continue
 
@@ -427,6 +489,7 @@ def _fetch_binance(symbol, timeframe, limit):
             continue
 
         try:
+
             raw_candles.append({
                 "timestamp": int(item[0]),
                 "open": float(item[1]),
@@ -456,6 +519,7 @@ def _fetch_binance(symbol, timeframe, limit):
 # =========================================================
 
 def _fetch_dukascopy(symbol, timeframe, limit):
+
     instrument = DUKASCOPY_SYMBOLS.get(symbol)
 
     if not instrument:
@@ -467,11 +531,18 @@ def _fetch_dukascopy(symbol, timeframe, limit):
 
     now = datetime.now(timezone.utc)
 
+    lookback_days = _calculate_lookback_days(
+        timeframe,
+        limit,
+    )
+
     from_date = (
-        now - timedelta(days=settings["lookback_days"])
+        now - timedelta(days=lookback_days)
     ).strftime("%Y-%m-%d")
 
-    to_date = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    to_date = now.strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
 
     safe_name = re.sub(
         r"[^a-zA-Z0-9_]",
@@ -508,6 +579,7 @@ def _fetch_dukascopy(symbol, timeframe, limit):
         ]
 
         try:
+
             result = subprocess.run(
                 command,
                 capture_output=True,
@@ -517,17 +589,20 @@ def _fetch_dukascopy(symbol, timeframe, limit):
             )
 
         except subprocess.TimeoutExpired as error:
+
             raise RuntimeError(
                 f"Dukascopy {symbol} {timeframe}: "
-                "ma'lumot olish vaqti tugadi"
+                "so'rov vaqti tugadi"
             ) from error
 
         except OSError as error:
+
             raise RuntimeError(
                 "Dukascopy dasturini ishga tushirib bo'lmadi"
             ) from error
 
         if result.returncode != 0:
+
             diagnostic = "\n".join(
                 part
                 for part in (
@@ -551,27 +626,32 @@ def _fetch_dukascopy(symbol, timeframe, limit):
         )
 
         if not os.path.isfile(output_file):
+
             raise RuntimeError(
                 "Dukascopy JSON fayli yaratilmadi"
             )
 
         try:
+
             with open(
                 output_file,
                 "r",
                 encoding="utf-8",
             ) as file:
+
                 raw_data = json.load(file)
 
         except (
             OSError,
             json.JSONDecodeError,
         ) as error:
+
             raise RuntimeError(
                 "Dukascopy JSON faylini o'qib bo'lmadi"
             ) from error
 
     if not isinstance(raw_data, list):
+
         raise RuntimeError(
             "Dukascopy noto'g'ri JSON format qaytardi"
         )
@@ -579,10 +659,12 @@ def _fetch_dukascopy(symbol, timeframe, limit):
     raw_candles = []
 
     for item in raw_data:
+
         if not isinstance(item, dict):
             continue
 
         try:
+
             raw_candles.append({
                 "timestamp": int(item["timestamp"]),
                 "open": float(item["open"]),
@@ -615,7 +697,7 @@ def _fetch_dukascopy(symbol, timeframe, limit):
 def get_candles(symbol, timeframe, limit=MAX_CANDLES):
     """
     Belgilangan instrument va timeframe uchun
-    Candle obyektlari ro'yxatini qaytaradi.
+    yopilgan Candle obyektlarini qaytaradi.
     """
 
     _validate_request(
@@ -625,6 +707,7 @@ def get_candles(symbol, timeframe, limit=MAX_CANDLES):
     )
 
     if symbol in BINANCE_SYMBOLS:
+
         return _fetch_binance(
             symbol=symbol,
             timeframe=timeframe,
@@ -632,6 +715,7 @@ def get_candles(symbol, timeframe, limit=MAX_CANDLES):
         )
 
     if symbol in DUKASCOPY_SYMBOLS:
+
         return _fetch_dukascopy(
             symbol=symbol,
             timeframe=timeframe,
@@ -645,7 +729,7 @@ def get_candles(symbol, timeframe, limit=MAX_CANDLES):
 
 def get_market_data(symbol, timeframe, limit=MAX_CANDLES):
     """
-    V6 tahlil modullari uchun MarketData obyektini qaytaradi.
+    V6 tahlil modullari uchun MarketData qaytaradi.
     """
 
     candles = get_candles(
