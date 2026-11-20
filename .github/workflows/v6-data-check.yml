@@ -32,10 +32,10 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      - name: Check V6 Python syntax
+      - name: Check V6 and test syntax
         run: python -m compileall -q v6 tests
 
-      - name: Run V6 indicator unit tests
+      - name: Run V6 indicator tests
         run: python -m unittest discover -s tests -p "test_v6_*.py" -v
 
       - name: Test all V6 instruments and timeframes
