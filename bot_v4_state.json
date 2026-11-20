@@ -331,7 +331,7 @@
       ]
     },
     "XAGUSD_H1": {
-      "signature": "2026-11-20T06:00:00+00:00_SELL",
+      "signature": "2026-11-20T07:00:00+00:00_SELL",
       "target_users": [
         "1867555949",
         "1906447505",
@@ -6303,8 +6303,12 @@
         "1906447505",
         "8678763398"
       ],
-      "notified_to": [],
-      "status": "OPEN",
+      "notified_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "status": "SL_HIT",
       "diagnostics": {
         "score": 60,
         "adx": 34.13787713496769,
@@ -6322,7 +6326,43 @@
         "structure_buy": 0,
         "structure_sell": 60
       },
-      "created_at": "2026-11-20T07:46:33.779722+00:00"
+      "created_at": "2026-11-20T07:46:33.779722+00:00",
+      "result_candle_time": "2026-11-20T07:45:00+00:00"
+    },
+    "XAGUSD_H1_2026-11-20T07:00:00+00:00_SELL": {
+      "symbol": "XAGUSD",
+      "timeframe": "H1",
+      "side": "SELL",
+      "entry": 42.238,
+      "sl": 45.65883858431864,
+      "tp1": 37.10674212352204,
+      "signal_candle_time": "2026-11-20T07:00:00+00:00",
+      "signal_candle_end_ms": 1795161600000,
+      "delivered_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "notified_to": [],
+      "status": "OPEN",
+      "diagnostics": {
+        "score": 60,
+        "adx": 54.02228526233287,
+        "plus_di": 6.198530120180896,
+        "minus_di": 33.407919197651566,
+        "rsi": 32.66547639230305,
+        "atr": 0.609192921593175,
+        "atr_risk_ratio": 5.615361674545371,
+        "ema20": 43.07783531522512,
+        "ema50": 44.31521413884658,
+        "ema200": 47.16986442616664,
+        "supertrend": -1,
+        "h1_direction": 0,
+        "h4_direction": -1,
+        "structure_buy": 0,
+        "structure_sell": 60
+      },
+      "created_at": "2026-11-20T08:01:47.753288+00:00"
     }
   }
 }
