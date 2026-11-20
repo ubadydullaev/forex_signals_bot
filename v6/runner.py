@@ -422,12 +422,14 @@ def main():
     logger.info("Telegram: %s", TELEGRAM_ENABLED)
     logger.info("=" * 60)
 
+    
     if TELEGRAM_ENABLED:
-    state, state_sha = load_state()
-else:
-    state, state_sha = {"signals": {}}, None
+        state, state_sha = load_state()
+    else:
+        state, state_sha = {"signals": {}}, None
 
     users = get_users() if TELEGRAM_ENABLED else []
+
 
     if TELEGRAM_ENABLED and not users:
         raise RuntimeError(
