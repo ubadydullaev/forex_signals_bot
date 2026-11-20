@@ -1,6 +1,7 @@
 
 import unittest
 import warnings
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 from v6 import data_adapter
@@ -8,68 +9,114 @@ from v6 import data_adapter
 
 class TestV6DataAdapter(unittest.TestCase):
 
-    def test_dukascopy_weekend_gap_is_ignored(self):
-        from datetime import datetime, timezone
-
-        friday = int(
+    @staticmethod
+    def timestamp(year, month, day, hour, minute):
+        return int(
             datetime(
-                2026, 11, 20, 20, 0,
-                tzinfo=timezone.utc
+                year, month, day, hour, minute,
+                tzinfo=timezone.utc,
             ).timestamp() * 1000
         )
 
-        monday = int(
-            datetime(
-                2026, 11, 23, 8, 0,
-                tzinfo=timezone.utc
-            ).timestamp() * 1000
+    @staticmethod
+    def candle(timestamp):
+        return data_adapter.Candle(
+            timestamp=timestamp,
+            open=2000,
+            high=2005,
+            low=1995,
+            close=2001,
+            volume=100,
+            is_closed=True,
+            source="dukascopy",
         )
 
-        candles = [
-            data_adapter.Candle(
-                timestamp=friday,
-                open=2000,
-                high=2005,
-                low=1995,
-                close=2001,
-                volume=100,
-                is_closed=True,
-                source="dukascopy",
-            ),
-            data_adapter.Candle(
-                timestamp=monday,
-                open=2001,
-                high=2006,
-                low=1998,
-                close=2004,
-                volume=100,
-                is_closed=True,
-                source="dukascopy",
-            ),
-        ]
-
+    def inspect(self, candles, symbol="XAUUSD", timeframe="M15"):
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-
             gaps = data_adapter._inspect_candle_gaps(
                 candles,
-                "M15",
+                timeframe,
                 "dukascopy",
+                symbol=symbol,
             )
+        return gaps, caught
+
+    def test_gold_daily_break_is_ignored(self):
+        first = self.timestamp(2026, 11, 16, 21, 45)
+        second = self.timestamp(2026, 11, 16, 23, 0)
+
+        gaps, caught = self.inspect(
+            [self.candle(first), self.candle(second)],
+            "XAUUSD",
+        )
 
         self.assertEqual(gaps, [])
         self.assertEqual(len(caught), 0)
 
-    def test_dukascopy_weekday_gap_generates_warning(self):
-        from datetime import datetime, timezone
+    def test_silver_daily_break_is_ignored(self):
+        first = self.timestamp(2026, 11, 16, 21, 45)
+        second = self.timestamp(2026, 11, 16, 23, 0)
 
-        first = int(
-            datetime(
-                2026, 11, 17, 10, 0,
-                tzinfo=timezone.utc
-            ).timestamp() * 1000
+        gaps, caught = self.inspect(
+            [self.candle(first), self.candle(second)],
+            "XAGUSD",
         )
 
+        self.assertEqual(gaps, [])
+        self.assertEqual(len(caught), 0)
+
+    def test_us500_daily_break_is_ignored(self):
+        first = self.timestamp(2026, 11, 16, 21, 0)
+        second = self.timestamp(2026, 11, 16, 23, 0)
+
+        gaps, caught = self.inspect(
+            [self.candle(first), self.candle(second)],
+            "US500",
+        )
+
+        self.assertEqual(gaps, [])
+        self.assertEqual(len(caught), 0)
+
+    def test_real_gold_weekday_gap_still_warns(self):
+        first = self.timestamp(2026, 11, 17, 10, 0)
+        second = self.timestamp(2026, 11, 17, 10, 45)
+
+        gaps, caught = self.inspect(
+            [self.candle(first), self.candle(second)],
+            "XAUUSD",
+        )
+
+        self.assertEqual(len(gaps), 1)
+        self.assertEqual(len(caught), 1)
+        self.assertEqual(gaps[0]["missing_intervals"], 2)
+
+    def test_real_us500_weekday_gap_still_warns(self):
+        first = self.timestamp(2026, 11, 17, 10, 0)
+        second = self.timestamp(2026, 11, 17, 10, 45)
+
+        gaps, caught = self.inspect(
+            [self.candle(first), self.candle(second)],
+            "US500",
+        )
+
+        self.assertEqual(len(gaps), 1)
+        self.assertEqual(len(caught), 1)
+
+    def test_dukascopy_weekend_gap_is_ignored(self):
+        friday = self.timestamp(2026, 11, 20, 20, 0)
+        monday = self.timestamp(2026, 11, 23, 8, 0)
+
+        gaps, caught = self.inspect(
+            [self.candle(friday), self.candle(monday)],
+            "XAUUSD",
+        )
+
+        self.assertEqual(gaps, [])
+        self.assertEqual(len(caught), 0)
+
+    def test_binance_weekday_gap_generates_warning(self):
+        first = self.timestamp(2026, 11, 17, 10, 0)
         second = first + 45 * 60 * 1000
 
         candles = [
@@ -81,7 +128,7 @@ class TestV6DataAdapter(unittest.TestCase):
                 close=2001,
                 volume=100,
                 is_closed=True,
-                source="dukascopy",
+                source="binance_spot",
             ),
             data_adapter.Candle(
                 timestamp=second,
@@ -91,31 +138,29 @@ class TestV6DataAdapter(unittest.TestCase):
                 close=2004,
                 volume=100,
                 is_closed=True,
-                source="dukascopy",
+                source="binance_spot",
             ),
         ]
 
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-
             gaps = data_adapter._inspect_candle_gaps(
                 candles,
                 "M15",
-                "dukascopy",
+                "binance_spot",
+                symbol="BTCUSD",
             )
 
         self.assertEqual(len(gaps), 1)
         self.assertEqual(len(caught), 1)
-        
+
     def make_raw_candles(self, count=3):
         base_timestamp = 1700000000000
         duration = 15 * 60 * 1000
-
         candles = []
 
         for i in range(count):
             price = 2000.0 + i
-
             candles.append({
                 "timestamp": base_timestamp + i * duration,
                 "open": price,
@@ -133,6 +178,7 @@ class TestV6DataAdapter(unittest.TestCase):
             timeframe="M15",
             source="binance_spot",
             limit=limit,
+            symbol="BTCUSD",
         )
 
     def test_valid_candles_are_returned(self):
@@ -149,7 +195,6 @@ class TestV6DataAdapter(unittest.TestCase):
 
     def test_invalid_ohlc_candle_is_rejected(self):
         raw = self.make_raw_candles(3)
-
         raw[1]["high"] = raw[1]["low"] - 10
 
         with patch.object(data_adapter, "MIN_CANDLES", 2):
@@ -159,7 +204,6 @@ class TestV6DataAdapter(unittest.TestCase):
 
     def test_negative_volume_candle_is_rejected(self):
         raw = self.make_raw_candles(3)
-
         raw[1]["volume"] = -100.0
 
         with patch.object(data_adapter, "MIN_CANDLES", 2):
@@ -178,7 +222,6 @@ class TestV6DataAdapter(unittest.TestCase):
 
     def test_conflicting_duplicate_is_rejected(self):
         raw = self.make_raw_candles(3)
-
         duplicate = raw[1].copy()
         duplicate["close"] += 10
         duplicate["high"] += 20
@@ -190,7 +233,6 @@ class TestV6DataAdapter(unittest.TestCase):
 
     def test_unclosed_future_candle_is_ignored(self):
         raw = self.make_raw_candles(3)
-
         import time
 
         future_timestamp = (
@@ -221,7 +263,6 @@ class TestV6DataAdapter(unittest.TestCase):
 
     def test_binance_gap_generates_warning(self):
         raw = self.make_raw_candles(3)
-
         duration = 15 * 60 * 1000
         raw[2]["timestamp"] += duration * 3
 
@@ -253,4 +294,3 @@ class TestV6DataAdapter(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-                                            
