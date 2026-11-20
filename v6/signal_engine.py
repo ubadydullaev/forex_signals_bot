@@ -21,6 +21,7 @@ MINIMUM_ALIGNMENT = 75.0
 MINIMUM_ADX = 18.0
 MINIMUM_RR = 1.5
 STOP_ATR_MULTIPLIER = 1.5
+RECENT_STRUCTURE_CANDLES = 3
 
 
 def _last_valid(values) -> Optional[float]:
@@ -66,14 +67,10 @@ def _get_macd_direction(macd_data: dict) -> str:
 
 def _check_direction(
     direction: str,
-    mtf: dict,
     m15_indicators: dict,
     structure: dict,
+    m15_candles: list[Candle],
 ) -> tuple[bool, list[str]]:
-    """
-    Check whether indicator and structure confirmations
-    support the selected direction.
-    """
 
     reasons = []
 
@@ -101,7 +98,9 @@ def _check_direction(
     )
 
     if supertrend_direction != expected_supertrend:
-        return False, ["M15 Supertrend does not confirm direction"]
+        return False, [
+            "M15 Supertrend does not confirm direction"
+        ]
 
     reasons.append("M15 Supertrend confirmed")
 
@@ -111,7 +110,6 @@ def _check_direction(
     if direction == "BULLISH":
         if not 50.0 < rsi_value < 75.0:
             return False, ["RSI does not confirm BUY"]
-
     else:
         if not 25.0 < rsi_value < 50.0:
             return False, ["RSI does not confirm SELL"]
@@ -128,31 +126,49 @@ def _check_direction(
 
     reasons.append("MACD confirmed")
 
-    # M15 market structure
+    # Market structure confirmation
     structure_trend = structure["trend"]
 
     if structure_trend != direction:
-        latest_event = (
-            structure["events"][-1]
-            if structure["events"]
-            else None
-        )
 
-        if (
-            latest_event is None
-            or latest_event.direction != direction
-        ):
-            return False, ["Market structure does not confirm direction"]
+        recent_timestamps = {
+            candle.timestamp
+            for candle in m15_candles[-RECENT_STRUCTURE_CANDLES:]
+        }
+
+        recent_events = [
+            event
+            for event in structure["events"]
+            if (
+                event.timestamp in recent_timestamps
+                and event.direction == direction
+            )
+        ]
+
+        if not recent_events:
+            return False, [
+                "No recent BOS/CHOCH confirmation"
+            ]
 
     reasons.append("Market structure confirmed")
 
-    # Liquidity sweep is an additional confirmation,
-    # not a mandatory condition.
-    if structure["liquidity_sweeps"]:
-        latest_sweep = structure["liquidity_sweeps"][-1]
+    # Recent liquidity sweep is optional confirmation
+    recent_timestamps = {
+        candle.timestamp
+        for candle in m15_candles[-RECENT_STRUCTURE_CANDLES:]
+    }
 
-        if latest_sweep.direction == direction:
-            reasons.append("Liquidity sweep confirmed")
+    recent_sweeps = [
+        sweep
+        for sweep in structure["liquidity_sweeps"]
+        if (
+            sweep.timestamp in recent_timestamps
+            and sweep.direction == direction
+        )
+    ]
+
+    if recent_sweeps:
+        reasons.append("Recent liquidity sweep confirmed")
 
     return True, reasons
 
@@ -161,18 +177,15 @@ def analyze_symbol(
     symbol: str,
     candles_by_timeframe: dict[str, list[Candle]],
 ) -> AnalysisResult:
+
     """
     Analyze one symbol using all configured timeframes.
 
-    IMPORTANT:
     Only fully closed candles should be passed to this function.
     This engine does not fetch market data or send Telegram messages.
     """
 
-    # --------------------------------------
-    # 1. Check available market data
-    # --------------------------------------
-
+    # 1. Validate market data
     for timeframe in TIMEFRAMES:
         candles = candles_by_timeframe.get(timeframe, [])
 
@@ -198,10 +211,7 @@ def analyze_symbol(
                 reasons=(reason,),
             )
 
-    # --------------------------------------
     # 2. Multi-timeframe analysis
-    # --------------------------------------
-
     mtf = analyze_mtf(candles_by_timeframe)
 
     overall_trend = mtf["overall_trend"]
@@ -209,7 +219,6 @@ def analyze_symbol(
 
     if overall_trend not in ("BULLISH", "BEARISH"):
         reason = "No clear multi-timeframe direction"
-
         signal = _hold_signal(symbol, reason)
 
         return AnalysisResult(
@@ -222,11 +231,7 @@ def analyze_symbol(
         )
 
     if alignment < MINIMUM_ALIGNMENT:
-        reason = (
-            f"MTF alignment too low: "
-            f"{alignment:.2f}%"
-        )
-
+        reason = f"MTF alignment too low: {alignment:.2f}%"
         signal = _hold_signal(symbol, reason)
 
         return AnalysisResult(
@@ -240,7 +245,6 @@ def analyze_symbol(
 
     if not mtf["higher_confirmation"]:
         reason = "D1, H4 and H1 do not fully agree"
-
         signal = _hold_signal(symbol, reason)
 
         return AnalysisResult(
@@ -254,7 +258,6 @@ def analyze_symbol(
 
     if not mtf["lower_confirmation"]:
         reason = "M30 and M15 confirmation is missing"
-
         signal = _hold_signal(symbol, reason)
 
         return AnalysisResult(
@@ -266,38 +269,25 @@ def analyze_symbol(
             reasons=(reason,),
         )
 
-    # --------------------------------------
-    # 3. Calculate M15 indicators
-    # --------------------------------------
-
+    # 3. Calculate M15 indicators and structure
     m15_candles = candles_by_timeframe["M15"]
 
     indicators = calculate_indicators(m15_candles)
-
     structure = analyze_market_structure(m15_candles)
 
     direction = overall_trend
+    side = "BUY" if direction == "BULLISH" else "SELL"
 
-    side = (
-        "BUY"
-        if direction == "BULLISH"
-        else "SELL"
-    )
-
-    # --------------------------------------
     # 4. Check confirmations
-    # --------------------------------------
-
     confirmed, confirmation_reasons = _check_direction(
-        direction,
-        mtf,
-        indicators,
-        structure,
+        direction=direction,
+        m15_indicators=indicators,
+        structure=structure,
+        m15_candles=m15_candles,
     )
 
     if not confirmed:
         reason = "; ".join(confirmation_reasons)
-
         signal = _hold_signal(symbol, reason)
 
         return AnalysisResult(
@@ -309,21 +299,14 @@ def analyze_symbol(
             reasons=tuple(confirmation_reasons),
         )
 
-    # --------------------------------------
-    # 5. Calculate entry, SL and TP
-    # --------------------------------------
-
+    # 5. Calculate entry, stop loss and take profit
     latest_candle = m15_candles[-1]
-
     entry = latest_candle.close
 
-    atr_value = _last_valid(
-        indicators["atr_14"]
-    )
+    atr_value = _last_valid(indicators["atr_14"])
 
     if atr_value is None or atr_value <= 0:
         reason = "ATR is unavailable"
-
         signal = _hold_signal(symbol, reason)
 
         return AnalysisResult(
@@ -340,15 +323,11 @@ def analyze_symbol(
     if side == "BUY":
         stop_loss = entry - stop_distance
         take_profit = entry + stop_distance * MINIMUM_RR
-
     else:
         stop_loss = entry + stop_distance
         take_profit = entry - stop_distance * MINIMUM_RR
 
-    # --------------------------------------
     # 6. Validate trade
-    # --------------------------------------
-
     validation = validate_trade(
         side=side,
         entry=entry,
@@ -360,7 +339,6 @@ def analyze_symbol(
 
     if not validation.valid:
         reason = "; ".join(validation.reasons)
-
         signal = _hold_signal(symbol, reason)
 
         return AnalysisResult(
@@ -372,22 +350,18 @@ def analyze_symbol(
             reasons=tuple(validation.reasons),
         )
 
-    # --------------------------------------
-    # 7. Calculate confidence estimate
-    # --------------------------------------
+    # 7. Confidence estimate (not win probability)
+    adx_for_confidence = (
+        _last_valid(indicators["adx"]["adx"]) or 0.0
+    )
 
     confidence = min(
         95.0,
-        alignment * 0.7 + min(
-            _last_valid(indicators["adx"]["adx"]) or 0.0,
-            50.0,
-        ) * 0.6,
+        alignment * 0.7
+        + min(adx_for_confidence, 50.0) * 0.6,
     )
 
-    # --------------------------------------
     # 8. Create final signal
-    # --------------------------------------
-
     signal = Signal(
         symbol=symbol,
         timeframe="M15",
@@ -407,5 +381,4 @@ def analyze_symbol(
         trend=overall_trend,
         strength=alignment,
         reasons=tuple(confirmation_reasons),
-      )
-          
+    )
