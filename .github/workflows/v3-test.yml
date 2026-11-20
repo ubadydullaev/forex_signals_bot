@@ -1,31 +1,14 @@
-name: Forex V3 Test
+name: Legacy V3 Test - DISABLED
 
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  test:
+  disabled:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Repository
-        uses: actions/checkout@v4
-
-      - name: Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install requirements
-        run: pip install requests
-
-      - name: Run V3
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          CLOUDFLARE_WORKER_URL: ${{ secrets.CLOUDFLARE_WORKER_URL }}
-          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_REF_NAME: ${{ github.ref_name }}
-        run: python bot_v3.py
+      - name: Legacy V3 sender disabled
+        run: echo "V3 signal sending is disabled. V6 is the only signal engine."
