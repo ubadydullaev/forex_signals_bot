@@ -1,0 +1,67 @@
+
+name: V6 Data Adapter Check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  data-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Dukascopy
+        run: npm install --no-save dukascopy-node
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Check V6 Python syntax
+        run: python -m compileall -q v6
+
+      - name: Test Binance and Dukascopy data
+        run: |
+          python - <<'PY'
+          from v6.data_adapter import get_market_data
+
+          tests = [
+              ("BTCUSD", "M15"),
+              ("EURUSD", "M15"),
+          ]
+
+          for symbol, timeframe in tests:
+              print(f"\nTesting {symbol} {timeframe}...")
+
+              market = get_market_data(
+                  symbol=symbol,
+                  timeframe=timeframe,
+                  limit=220,
+              )
+
+              print("Symbol:", market.symbol)
+              print("Timeframe:", market.timeframe)
+              print("Candles:", len(market.candles))
+              print("Source:", market.candles[-1].source)
+              print("Last candle closed:", market.candles[-1].is_closed)
+
+              assert len(market.candles) >= 220
+              assert all(c.is_closed for c in market.candles)
+
+          print("\nV6 DATA CHECK PASSED")
+          PY
