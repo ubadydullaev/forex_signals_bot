@@ -104,8 +104,8 @@ class TestV6DataAdapter(unittest.TestCase):
         self.assertEqual(len(caught), 1)
 
     def test_dukascopy_weekend_gap_is_ignored(self):
-        friday = self.timestamp(2026, 11, 20, 20, 0)
-        monday = self.timestamp(2026, 11, 23, 8, 0)
+        friday = self.timestamp(2026, 11, 20, 22, 0)
+        monday = self.timestamp(2026, 11, 23, 23, 0)
 
         gaps, caught = self.inspect(
             [self.candle(friday), self.candle(monday)],
