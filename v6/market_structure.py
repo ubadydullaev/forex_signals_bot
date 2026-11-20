@@ -35,6 +35,76 @@ class LiquiditySweep:
 
 
 # ==========================================
+# INTERNAL HELPERS
+# ==========================================
+
+def _validate_window(left: int = 1, right: int = 1) -> None:
+    if (
+        isinstance(left, bool)
+        or not isinstance(left, int)
+        or left < 1
+    ):
+        raise ValueError("left must be a positive integer")
+
+    if (
+        isinstance(right, bool)
+        or not isinstance(right, int)
+        or right < 1
+    ):
+        raise ValueError("right must be a positive integer")
+
+
+def _valid_swing_points(
+    swing_points: list[SwingPoint],
+    candle_count: int,
+) -> list[SwingPoint]:
+    """Keep structurally valid swing points and sort chronologically."""
+
+    valid = []
+
+    for point in swing_points:
+        if point.kind not in ("HIGH", "LOW"):
+            continue
+
+        if (
+            isinstance(point.index, bool)
+            or not isinstance(point.index, int)
+            or point.index < 0
+            or point.index >= candle_count
+        ):
+            continue
+
+        if (
+            not isinstance(point.price, (int, float))
+            or isinstance(point.price, bool)
+        ):
+            continue
+
+        if point.price <= 0:
+            continue
+
+        valid.append(point)
+
+    return sorted(
+        valid,
+        key=lambda point: (point.index, point.timestamp),
+    )
+
+
+def _confirmed_before(
+    point: SwingPoint,
+    candle_index: int,
+    right: int,
+) -> bool:
+    """
+    A swing becomes usable only after its right-side confirmation
+    candles have closed. It is first usable on the following candle.
+    """
+
+    return point.index + right < candle_index
+
+
+# ==========================================
 # SWING POINTS
 # ==========================================
 
@@ -44,10 +114,12 @@ def find_swing_points(
     right: int = 3,
 ) -> list[SwingPoint]:
 
-    if left < 1 or right < 1:
-        raise ValueError("left and right must be positive")
+    _validate_window(left, right)
 
     points = []
+
+    if len(candles) < left + right + 1:
+        return points
 
     for i in range(left, len(candles) - right):
         current = candles[i]
@@ -85,7 +157,10 @@ def find_swing_points(
                 )
             )
 
-    return sorted(points, key=lambda point: point.index)
+    return sorted(
+        points,
+        key=lambda point: (point.index, point.timestamp),
+    )
 
 
 # ==========================================
@@ -98,13 +173,19 @@ def detect_trend(
 
     highs = [
         point.price
-        for point in swing_points
+        for point in sorted(
+            swing_points,
+            key=lambda point: point.index,
+        )
         if point.kind == "HIGH"
     ]
 
     lows = [
         point.price
-        for point in swing_points
+        for point in sorted(
+            swing_points,
+            key=lambda point: point.index,
+        )
         if point.kind == "LOW"
     ]
 
@@ -136,93 +217,145 @@ def detect_structure_events(
     right: int = 3,
 ) -> list[StructureEvent]:
 
-    if right < 1:
-        raise ValueError("right must be positive")
+    _validate_window(right=right)
 
-    events = []
+    if len(candles) < 2 or not swing_points:
+        return []
+
+    points = _valid_swing_points(
+        swing_points,
+        len(candles),
+    )
 
     highs = [
-        point
-        for point in swing_points
+        point for point in points
         if point.kind == "HIGH"
     ]
 
     lows = [
-        point
-        for point in swing_points
+        point for point in points
         if point.kind == "LOW"
     ]
 
-    last_broken_high_index = -1
-    last_broken_low_index = -1
+    events = []
+
+    broken_highs = set()
+    broken_lows = set()
 
     current_structure = "UNKNOWN"
 
-    for i, candle in enumerate(candles):
+    for i in range(1, len(candles)):
+        candle = candles[i]
+        previous_close = candles[i - 1].close
 
         available_highs = [
             point
             for point in highs
-            if point.index + right < i
-            and point.index > last_broken_high_index
+            if (
+                point.index not in broken_highs
+                and _confirmed_before(point, i, right)
+            )
         ]
 
         available_lows = [
             point
             for point in lows
-            if point.index + right < i
-            and point.index > last_broken_low_index
+            if (
+                point.index not in broken_lows
+                and _confirmed_before(point, i, right)
+            )
         ]
 
-        # Bullish break of structure
-        if available_highs:
-            candidate = available_highs[-1]
+        # ----------------------------------
+        # BULLISH BREAK
+        # ----------------------------------
 
-            if candle.close > candidate.price:
+        crossed_highs = [
+            point
+            for point in available_highs
+            if (
+                previous_close <= point.price
+                and candle.close > point.price
+            )
+        ]
 
-                event_type = (
-                    "CHOCH"
-                    if current_structure == "BEARISH"
-                    else "BOS"
+        # Levels already crossed before becoming usable
+        # are invalidated without generating a late event.
+        for point in available_highs:
+            if (
+                previous_close > point.price
+                and candle.close > point.price
+            ):
+                broken_highs.add(point.index)
+
+        if crossed_highs:
+            candidate = crossed_highs[-1]
+
+            event_type = (
+                "CHOCH"
+                if current_structure == "BEARISH"
+                else "BOS"
+            )
+
+            events.append(
+                StructureEvent(
+                    event=event_type,
+                    direction="BULLISH",
+                    price=candle.close,
+                    timestamp=candle.timestamp,
+                    level=candidate.price,
                 )
+            )
 
-                events.append(
-                    StructureEvent(
-                        event=event_type,
-                        direction="BULLISH",
-                        price=candle.close,
-                        timestamp=candle.timestamp,
-                        level=candidate.price,
-                    )
+            current_structure = "BULLISH"
+
+            # Consume every high level crossed by this candle.
+            for point in crossed_highs:
+                broken_highs.add(point.index)
+
+        # ----------------------------------
+        # BEARISH BREAK
+        # ----------------------------------
+
+        crossed_lows = [
+            point
+            for point in available_lows
+            if (
+                previous_close >= point.price
+                and candle.close < point.price
+            )
+        ]
+
+        for point in available_lows:
+            if (
+                previous_close < point.price
+                and candle.close < point.price
+            ):
+                broken_lows.add(point.index)
+
+        if crossed_lows:
+            candidate = crossed_lows[-1]
+
+            event_type = (
+                "CHOCH"
+                if current_structure == "BULLISH"
+                else "BOS"
+            )
+
+            events.append(
+                StructureEvent(
+                    event=event_type,
+                    direction="BEARISH",
+                    price=candle.close,
+                    timestamp=candle.timestamp,
+                    level=candidate.price,
                 )
+            )
 
-                current_structure = "BULLISH"
-                last_broken_high_index = candidate.index
+            current_structure = "BEARISH"
 
-        # Bearish break of structure
-        if available_lows:
-            candidate = available_lows[-1]
-
-            if candle.close < candidate.price:
-
-                event_type = (
-                    "CHOCH"
-                    if current_structure == "BULLISH"
-                    else "BOS"
-                )
-
-                events.append(
-                    StructureEvent(
-                        event=event_type,
-                        direction="BEARISH",
-                        price=candle.close,
-                        timestamp=candle.timestamp,
-                        level=candidate.price,
-                    )
-                )
-
-                current_structure = "BEARISH"
-                last_broken_low_index = candidate.index
+            for point in crossed_lows:
+                broken_lows.add(point.index)
 
     return events
 
@@ -237,62 +370,121 @@ def detect_liquidity_sweeps(
     right: int = 3,
 ) -> list[LiquiditySweep]:
 
-    if right < 1:
-        raise ValueError("right must be positive")
+    _validate_window(right=right)
 
-    sweeps = []
+    if not candles or not swing_points:
+        return []
+
+    points = _valid_swing_points(
+        swing_points,
+        len(candles),
+    )
 
     highs = [
-        point
-        for point in swing_points
+        point for point in points
         if point.kind == "HIGH"
     ]
 
     lows = [
-        point
-        for point in swing_points
+        point for point in points
         if point.kind == "LOW"
     ]
+
+    sweeps = []
+
+    consumed_highs = set()
+    consumed_lows = set()
 
     for i, candle in enumerate(candles):
 
         confirmed_highs = [
             point
             for point in highs
-            if point.index + right < i
+            if (
+                point.index not in consumed_highs
+                and _confirmed_before(point, i, right)
+            )
         ]
 
         confirmed_lows = [
             point
             for point in lows
-            if point.index + right < i
+            if (
+                point.index not in consumed_lows
+                and _confirmed_before(point, i, right)
+            )
         ]
 
-        if confirmed_highs:
-            level = confirmed_highs[-1].price
+        # ----------------------------------
+        # BEARISH LIQUIDITY SWEEP
+        # Price takes a previous high and
+        # closes back below that level.
+        # ----------------------------------
 
-            if candle.high > level and candle.close < level:
-                sweeps.append(
-                    LiquiditySweep(
-                        direction="BEARISH",
-                        timestamp=candle.timestamp,
-                        swept_level=level,
-                        close=candle.close,
-                    )
+        swept_highs = [
+            point
+            for point in confirmed_highs
+            if (
+                candle.high > point.price
+                and candle.close < point.price
+            )
+        ]
+
+        if swept_highs:
+            candidate = swept_highs[-1]
+
+            sweeps.append(
+                LiquiditySweep(
+                    direction="BEARISH",
+                    timestamp=candle.timestamp,
+                    swept_level=candidate.price,
+                    close=candle.close,
                 )
+            )
 
-        if confirmed_lows:
-            level = confirmed_lows[-1].price
+            # A swept level must not be counted again.
+            for point in swept_highs:
+                consumed_highs.add(point.index)
 
-            if candle.low < level and candle.close > level:
-                sweeps.append(
-                    LiquiditySweep(
-                        direction="BULLISH",
-                        timestamp=candle.timestamp,
-                        swept_level=level,
-                        close=candle.close,
-                    )
+        # A close above a high invalidates that old liquidity level.
+        for point in confirmed_highs:
+            if candle.close > point.price:
+                consumed_highs.add(point.index)
+
+        # ----------------------------------
+        # BULLISH LIQUIDITY SWEEP
+        # Price takes a previous low and
+        # closes back above that level.
+        # ----------------------------------
+
+        swept_lows = [
+            point
+            for point in confirmed_lows
+            if (
+                candle.low < point.price
+                and candle.close > point.price
+            )
+        ]
+
+        if swept_lows:
+            candidate = swept_lows[-1]
+
+            sweeps.append(
+                LiquiditySweep(
+                    direction="BULLISH",
+                    timestamp=candle.timestamp,
+                    swept_level=candidate.price,
+                    close=candle.close,
                 )
+            )
+
+            for point in swept_lows:
+                consumed_lows.add(point.index)
+
+        # A close below a low invalidates that old liquidity level.
+        for point in confirmed_lows:
+            if candle.close < point.price:
+                consumed_lows.add(point.index)
 
     return sweeps
 
@@ -319,15 +511,19 @@ def get_support_resistance(
     supports = [
         point.price
         for point in swing_points
-        if point.kind == "LOW"
-        and point.price < current_price
+        if (
+            point.kind == "LOW"
+            and point.price < current_price
+        )
     ]
 
     resistances = [
         point.price
         for point in swing_points
-        if point.kind == "HIGH"
-        and point.price > current_price
+        if (
+            point.kind == "HIGH"
+            and point.price > current_price
+        )
     ]
 
     return {
@@ -345,6 +541,8 @@ def analyze_market_structure(
     left: int = 3,
     right: int = 3,
 ) -> dict:
+
+    _validate_window(left, right)
 
     if not candles:
         return {
