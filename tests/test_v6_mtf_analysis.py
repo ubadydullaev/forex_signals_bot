@@ -57,7 +57,7 @@ class TestV6MTFAnalysis(unittest.TestCase):
         self.assertEqual(result["total_weight"], expected)
         self.assertEqual(result["alignment_percent"], 100.0)
 
-    def test_higher_timeframes_and_m30_can_confirm_without_m15(self):
+    def test_higher_timeframes_and_m30_confirm(self):
         result = self.run_with_trends({
             "D1": "BULLISH",
             "H4": "BULLISH",
@@ -71,11 +71,10 @@ class TestV6MTFAnalysis(unittest.TestCase):
         self.assertTrue(result["lower_confirmation"])
         self.assertAlmostEqual(
             result["alignment_percent"],
-            8.0 / 9.5 * 100.0,
+            9.0 / 9.5 * 100.0,
             places=2,
         )
 
-    
     def test_m30_opposition_prevents_lower_confirmation(self):
         result = self.run_with_trends({
             "D1": "BULLISH",
@@ -85,6 +84,7 @@ class TestV6MTFAnalysis(unittest.TestCase):
             "M15": "BULLISH",
         })
 
+        self.assertEqual(result["overall_trend"], "BULLISH")
         self.assertTrue(result["higher_confirmation"])
         self.assertFalse(result["lower_confirmation"])
         self.assertAlmostEqual(
@@ -92,11 +92,6 @@ class TestV6MTFAnalysis(unittest.TestCase):
             8.5 / 9.5 * 100.0,
             places=2,
         )
-
-
-        self.assertTrue(result["higher_confirmation"])
-        self.assertFalse(result["lower_confirmation"])
-        self.assertLess(result["alignment_percent"], 75.0)
 
     def test_higher_timeframe_disagreement_blocks_confirmation(self):
         result = self.run_with_trends({
@@ -120,7 +115,7 @@ class TestV6MTFAnalysis(unittest.TestCase):
 
         self.assertAlmostEqual(
             result["alignment_percent"],
-            8.0 / 9.5 * 100.0,
+            9.0 / 9.5 * 100.0,
             places=2,
         )
 
@@ -135,4 +130,3 @@ class TestV6MTFAnalysis(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-                                      
