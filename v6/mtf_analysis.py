@@ -184,12 +184,14 @@ def analyze_mtf(
     available_weight = 0.0
 
     total_weight = sum(
-        TIMEFRAME_WEIGHTS.get(timeframe, 1.0)
-        for timeframe in TIMEFRAMES
+        total_weight = sum(
+        TIMEFRAME_WEIGHTS[timeframe]
+        for timeframe in ALIGNMENT_TIMEFRAMES
     )
 
-    for timeframe, result in timeframe_results.items():
-        weight = TIMEFRAME_WEIGHTS.get(timeframe, 1.0)
+    for timeframe in ALIGNMENT_TIMEFRAMES:
+        result = timeframe_results[timeframe]
+        weight = TIMEFRAME_WEIGHTS[timeframe]
         trend = result["trend"]
 
         if trend not in DIRECTIONAL_TRENDS:
@@ -201,59 +203,3 @@ def analyze_mtf(
             bullish_score += weight
         else:
             bearish_score += weight
-
-    if bullish_score == 0.0 and bearish_score == 0.0:
-        overall_trend = "UNKNOWN"
-        alignment = 0.0
-
-    elif bullish_score > bearish_score:
-        overall_trend = "BULLISH"
-        alignment = (
-            bullish_score / total_weight * 100.0
-            if total_weight else 0.0
-        )
-
-    elif bearish_score > bullish_score:
-        overall_trend = "BEARISH"
-        alignment = (
-            bearish_score / total_weight * 100.0
-            if total_weight else 0.0
-        )
-
-    else:
-        overall_trend = "RANGING"
-        alignment = (
-            max(bullish_score, bearish_score)
-            / total_weight * 100.0
-            if total_weight else 0.0
-        )
-
-    # Higher timeframe agreement
-    higher_timeframes = ("D1", "H4", "H1")
-
-    higher_confirmation = (
-        overall_trend in DIRECTIONAL_TRENDS
-        and all(
-            timeframe_results[timeframe]["trend"] == overall_trend
-            for timeframe in higher_timeframes
-        )
-    )
-
-    # M30 confirmation
-    lower_confirmation = (
-        overall_trend in DIRECTIONAL_TRENDS
-        and timeframe_results.get("M30", {}).get("trend")
-        == overall_trend
-    )
-
-    return {
-        "overall_trend": overall_trend,
-        "alignment_percent": round(alignment, 2),
-        "bullish_score": round(bullish_score, 2),
-        "bearish_score": round(bearish_score, 2),
-        "available_weight": round(available_weight, 2),
-        "total_weight": round(total_weight, 2),
-        "higher_confirmation": higher_confirmation,
-        "lower_confirmation": lower_confirmation,
-        "timeframes": timeframe_results,
-    }
