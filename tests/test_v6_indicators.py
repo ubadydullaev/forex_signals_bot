@@ -137,7 +137,7 @@ class TestV6Indicators(unittest.TestCase):
 
     def test_supertrend_returns_all_series(self):
         candles = self.make_candles(
-            [100, 110, 120, 130, 140, 150]
+            [100, 110, 150, 160, 170, 180]
         )
         result = supertrend(candles, period=2)
 
