@@ -10,7 +10,7 @@ permissions:
 jobs:
   data-check:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
 
     steps:
       - name: Checkout repository
@@ -35,33 +35,59 @@ jobs:
       - name: Check V6 Python syntax
         run: python -m compileall -q v6
 
-      - name: Test Binance and Dukascopy data
+      - name: Test all V6 instruments and timeframes
         run: |
           python - <<'PY'
           from v6.data_adapter import get_market_data
+          from v6.config import SYMBOLS, TIMEFRAMES
 
-          tests = [
-              ("BTCUSD", "M15"),
-              ("EURUSD", "M15"),
-          ]
+          passed = []
+          failed = []
 
-          for symbol, timeframe in tests:
-              print(f"\nTesting {symbol} {timeframe}...")
+          for symbol in SYMBOLS:
+              for timeframe in TIMEFRAMES:
+                  print(f"\nTesting {symbol} {timeframe}...", flush=True)
 
-              market = get_market_data(
-                  symbol=symbol,
-                  timeframe=timeframe,
-                  limit=250,
-              )
+                  try:
+                      market = get_market_data(
+                          symbol=symbol,
+                          timeframe=timeframe,
+                          limit=250,
+                      )
 
-              print("Symbol:", market.symbol)
-              print("Timeframe:", market.timeframe)
-              print("Candles:", len(market.candles))
-              print("Source:", market.candles[-1].source)
-              print("Last candle closed:", market.candles[-1].is_closed)
+                      assert len(market.candles) >= 220, (
+                          f"Not enough candles: {len(market.candles)}"
+                      )
 
-              assert len(market.candles) >= 220
-              assert all(c.is_closed for c in market.candles)
+                      assert all(c.is_closed for c in market.candles), (
+                          "Unclosed candle found"
+                      )
 
-          print("\nV6 DATA CHECK PASSED")
+                      assert all(c.source != "unknown" for c in market.candles), (
+                          "Unknown data source"
+                      )
+
+                      print("Candles:", len(market.candles))
+                      print("Source:", market.candles[-1].source)
+                      print("Last candle closed:", market.candles[-1].is_closed)
+
+                      passed.append(f"{symbol} {timeframe}")
+                      print("RESULT: PASSED", flush=True)
+
+                  except Exception as error:
+                      failed.append((symbol, timeframe, str(error)))
+                      print("RESULT: FAILED", error, flush=True)
+
+          print("\n========== V6 DATA TEST SUMMARY ==========")
+          print("Passed:", len(passed))
+          print("Failed:", len(failed))
+
+          if failed:
+              print("\nFAILED TESTS:")
+              for symbol, timeframe, error in failed:
+                  print(f"{symbol} {timeframe}: {error}")
+
+              raise SystemExit("V6 DATA CHECK FAILED")
+
+          print("\nALL 35 DATA TESTS PASSED")
           PY
