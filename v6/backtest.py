@@ -621,7 +621,26 @@ def analyze_cached_mtf(caches, indices):
 # ==========================================
 # CACHED SIGNAL ANALYSIS
 # ==========================================
+def validate_cached_trade(
+    side,
+    entry,
+    stop_loss,
+    take_profit,
+    atr_value,
+):
+    validation = validate_trade(
+        side=side,
+        entry=entry,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
+        atr_value=atr_value,
+        minimum_rr=MINIMUM_RR,
+    )
 
+    return (
+        validation.valid,
+        "; ".join(validation.reasons),
+    )
 def analyze_cached_signal(symbol, caches, indices):
     mtf = analyze_cached_mtf(caches, indices)
 
@@ -737,7 +756,7 @@ def analyze_cached_signal(symbol, caches, indices):
         stop_loss = entry + stop_distance
         take_profit = entry - stop_distance * MINIMUM_RR
 
-    if (
+   if (
         entry <= 0
         or stop_loss <= 0
         or take_profit <= 0
@@ -747,6 +766,17 @@ def analyze_cached_signal(symbol, caches, indices):
         )
     ):
         return None, "Invalid trade levels"
+
+    trade_valid, validation_reason = validate_cached_trade(
+        side=side,
+        entry=entry,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
+        atr_value=atr_value,
+    )
+
+    if not trade_valid:
+        return None, validation_reason
 
     adx_for_confidence = adx_value or 0.0
 
