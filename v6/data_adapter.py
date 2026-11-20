@@ -499,6 +499,7 @@ def _fetch_dukascopy(symbol, timeframe, limit):
             settings["dukascopy_tf"],
             "-f",
             "json",
+            "-v",
             "-dir",
             output_dir,
             "-fn",
@@ -590,9 +591,7 @@ def _fetch_dukascopy(symbol, timeframe, limit):
                 "high": float(item["high"]),
                 "low": float(item["low"]),
                 "close": float(item["close"]),
-                "volume": float(
-                    item.get("volume", 0.0)
-                ),
+                "volume": float(item["volume"]),
             })
 
         except (
