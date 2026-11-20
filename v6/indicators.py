@@ -8,25 +8,28 @@ from .models import Candle
 # V6 TECHNICAL INDICATORS
 # ==========================================
 
-def ema(values: list[float], period: int) -> list[Optional[float]]:
-    """Exponential Moving Average."""
+
+def ema(
+    values: list[float],
+    period: int,
+) -> list[Optional[float]]:
+    """EMA using the first valid source value as its seed."""
 
     if period <= 0:
         raise ValueError("Period must be positive")
 
-    result = [None] * len(values)
+    result: list[Optional[float]] = [None] * len(values)
 
-    if len(values) < period:
+    if not values:
         return result
 
     multiplier = 2.0 / (period + 1)
+    current = float(values[0])
+    result[0] = current
 
-    current = sum(values[:period]) / period
-    result[period - 1] = current
-
-    for i in range(period, len(values)):
+    for i in range(1, len(values)):
         current = (
-            values[i] * multiplier
+            float(values[i]) * multiplier
             + current * (1.0 - multiplier)
         )
         result[i] = current
@@ -34,104 +37,34 @@ def ema(values: list[float], period: int) -> list[Optional[float]]:
     return result
 
 
-def rsi(
-    closes: list[float],
-    period: int = 14
+def _wilder_average(
+    values: list[Optional[float]],
+    period: int,
 ) -> list[Optional[float]]:
-    """Wilder Relative Strength Index."""
+    """Wilder RMA with an SMA seed from the first period valid values."""
 
     if period <= 0:
         raise ValueError("Period must be positive")
 
-    result = [None] * len(closes)
+    result: list[Optional[float]] = [None] * len(values)
 
-    if len(closes) <= period:
-        return result
-
-    gains = []
-    losses = []
-
-    for i in range(1, len(closes)):
-        change = closes[i] - closes[i - 1]
-        gains.append(max(change, 0.0))
-        losses.append(max(-change, 0.0))
-
-    avg_gain = sum(gains[:period]) / period
-    avg_loss = sum(losses[:period]) / period
-
-    def calculate_rsi(gain, loss):
-        if loss == 0:
-            return 100.0 if gain > 0 else 50.0
-
-        rs = gain / loss
-        return 100.0 - (100.0 / (1.0 + rs))
-
-    result[period] = calculate_rsi(avg_gain, avg_loss)
-
-    for i in range(period + 1, len(closes)):
-        index = i - 1
-
-        avg_gain = (
-            avg_gain * (period - 1) + gains[index]
-        ) / period
-
-        avg_loss = (
-            avg_loss * (period - 1) + losses[index]
-        ) / period
-
-        result[i] = calculate_rsi(avg_gain, avg_loss)
-
-    return result
-
-
-def _true_ranges(candles: list[Candle]) -> list[float]:
-    """True Range."""
-
-    result = []
-
-    for i, candle in enumerate(candles):
-        if i == 0:
-            tr = candle.high - candle.low
-        else:
-            previous_close = candles[i - 1].close
-
-            tr = max(
-                candle.high - candle.low,
-                abs(candle.high - previous_close),
-                abs(candle.low - previous_close),
-            )
-
-        result.append(tr)
-
-    return result
-
-
-def _wilder_average(
-    values: list[Optional[float]],
-    period: int
-) -> list[Optional[float]]:
-    """Wilder smoothing with an initial SMA."""
-
-    result = [None] * len(values)
-
-    valid_indices = []
-    initial_values = []
+    initial: list[float] = []
+    start_index = None
 
     for i, value in enumerate(values):
         if value is None:
             continue
 
-        valid_indices.append(i)
-        initial_values.append(value)
+        initial.append(float(value))
 
-        if len(initial_values) == period:
+        if len(initial) == period:
+            start_index = i
             break
 
-    if len(initial_values) < period:
+    if start_index is None:
         return result
 
-    start_index = valid_indices[-1]
-    current = sum(initial_values) / period
+    current = sum(initial) / period
     result[start_index] = current
 
     for i in range(start_index + 1, len(values)):
@@ -141,7 +74,7 @@ def _wilder_average(
             continue
 
         current = (
-            current * (period - 1) + value
+            current * (period - 1) + float(value)
         ) / period
 
         result[i] = current
@@ -149,21 +82,117 @@ def _wilder_average(
     return result
 
 
-def atr(
-    candles: list[Candle],
-    period: int = 14
+def rsi(
+    closes: list[float],
+    period: int = 14,
 ) -> list[Optional[float]]:
-    """Average True Range."""
+    """Relative Strength Index using Wilder smoothing."""
 
     if period <= 0:
         raise ValueError("Period must be positive")
 
-    true_ranges = _true_ranges(candles)
+    result: list[Optional[float]] = [None] * len(closes)
+
+    if len(closes) <= period:
+        return result
+
+    gains: list[Optional[float]] = [None]
+    losses: list[Optional[float]] = [None]
+
+    for i in range(1, len(closes)):
+        change = float(closes[i]) - float(closes[i - 1])
+        gains.append(max(change, 0.0))
+        losses.append(max(-change, 0.0))
+
+    avg_gain = _wilder_average(gains, period)
+    avg_loss = _wilder_average(losses, period)
+
+    for i in range(len(closes)):
+        gain = avg_gain[i]
+        loss = avg_loss[i]
+
+        if gain is None or loss is None:
+            continue
+
+        if loss == 0:
+            result[i] = 100.0 if gain > 0 else 50.0
+        elif gain == 0:
+            result[i] = 0.0
+        else:
+            rs = gain / loss
+            result[i] = 100.0 - (100.0 / (1.0 + rs))
+
+    return result
+
+
+def _true_ranges(
+    candles: list[Candle],
+) -> list[float]:
+    """True Range."""
+
+    result: list[float] = []
+
+    for i, candle in enumerate(candles):
+        if i == 0:
+            value = candle.high - candle.low
+        else:
+            previous_close = candles[i - 1].close
+
+            value = max(
+                candle.high - candle.low,
+                abs(candle.high - previous_close),
+                abs(candle.low - previous_close),
+            )
+
+        result.append(value)
+
+    return result
+
+
+def atr(
+    candles: list[Candle],
+    period: int = 14,
+) -> list[Optional[float]]:
+    """Average True Range using Wilder RMA."""
+
+    if period <= 0:
+        raise ValueError("Period must be positive")
 
     return _wilder_average(
-        true_ranges,
-        period
+        _true_ranges(candles),
+        period,
     )
+
+
+def _ema_optional(
+    values: list[Optional[float]],
+    period: int,
+) -> list[Optional[float]]:
+    """EMA for a series containing None values."""
+
+    if period <= 0:
+        raise ValueError("Period must be positive")
+
+    result: list[Optional[float]] = [None] * len(values)
+
+    multiplier = 2.0 / (period + 1)
+    current = None
+
+    for i, value in enumerate(values):
+        if value is None:
+            continue
+
+        if current is None:
+            current = float(value)
+        else:
+            current = (
+                float(value) * multiplier
+                + current * (1.0 - multiplier)
+            )
+
+        result[i] = current
+
+    return result
 
 
 def macd(
@@ -171,8 +200,8 @@ def macd(
     fast: int = 12,
     slow: int = 26,
     signal_period: int = 9,
-):
-    """Moving Average Convergence Divergence."""
+) -> dict:
+    """MACD with EMA-based fast, slow and signal lines."""
 
     if fast <= 0 or slow <= 0 or signal_period <= 0:
         raise ValueError("Periods must be positive")
@@ -183,30 +212,32 @@ def macd(
     fast_ema = ema(closes, fast)
     slow_ema = ema(closes, slow)
 
-    macd_line = [
-        (
-            fast_ema[i] - slow_ema[i]
-            if fast_ema[i] is not None
-            and slow_ema[i] is not None
-            else None
-        )
-        for i in range(len(closes))
-    ]
+    macd_line: list[Optional[float]] = []
 
-    signal_line = _wilder_ema_optional(
+    for i in range(len(closes)):
+        fast_value = fast_ema[i]
+        slow_value = slow_ema[i]
+
+        if fast_value is None or slow_value is None:
+            macd_line.append(None)
+        else:
+            macd_line.append(fast_value - slow_value)
+
+    signal_line = _ema_optional(
         macd_line,
-        signal_period
+        signal_period,
     )
 
-    histogram = [
-        (
-            macd_line[i] - signal_line[i]
-            if macd_line[i] is not None
-            and signal_line[i] is not None
-            else None
-        )
-        for i in range(len(closes))
-    ]
+    histogram: list[Optional[float]] = []
+
+    for i in range(len(closes)):
+        main = macd_line[i]
+        signal = signal_line[i]
+
+        if main is None or signal is None:
+            histogram.append(None)
+        else:
+            histogram.append(main - signal)
 
     return {
         "macd": macd_line,
@@ -215,61 +246,19 @@ def macd(
     }
 
 
-def _wilder_ema_optional(
-    values: list[Optional[float]],
-    period: int
-) -> list[Optional[float]]:
-    """EMA for a series containing None values."""
-
-    result = [None] * len(values)
-
-    valid = [
-        (i, value)
-        for i, value in enumerate(values)
-        if value is not None
-    ]
-
-    if len(valid) < period:
-        return result
-
-    multiplier = 2.0 / (period + 1)
-
-    start_index = valid[period - 1][0]
-    current = sum(
-        value for _, value in valid[:period]
-    ) / period
-
-    result[start_index] = current
-
-    for i in range(start_index + 1, len(values)):
-        value = values[i]
-
-        if value is None:
-            continue
-
-        current = (
-            value * multiplier
-            + current * (1.0 - multiplier)
-        )
-
-        result[i] = current
-
-    return result
-
-
 def adx(
     candles: list[Candle],
-    period: int = 14
-):
-    """Average Directional Index."""
+    period: int = 14,
+) -> dict:
+    """Directional Movement Index and ADX using Wilder smoothing."""
 
     if period <= 0:
         raise ValueError("Period must be positive")
 
     length = len(candles)
 
-    plus_dm = [0.0] * length
-    minus_dm = [0.0] * length
+    plus_dm: list[Optional[float]] = [None] * length
+    minus_dm: list[Optional[float]] = [None] * length
 
     for i in range(1, length):
         up_move = (
@@ -280,42 +269,51 @@ def adx(
             candles[i - 1].low - candles[i].low
         )
 
-        if up_move > down_move and up_move > 0:
-            plus_dm[i] = up_move
+        plus_dm[i] = (
+            up_move
+            if up_move > down_move and up_move > 0
+            else 0.0
+        )
 
-        if down_move > up_move and down_move > 0:
-            minus_dm[i] = down_move
+        minus_dm[i] = (
+            down_move
+            if down_move > up_move and down_move > 0
+            else 0.0
+        )
 
-    tr = _true_ranges(candles)
+    smooth_tr = _wilder_average(
+        _true_ranges(candles),
+        period,
+    )
 
-    smooth_tr = _wilder_average(tr, period)
     smooth_plus = _wilder_average(plus_dm, period)
     smooth_minus = _wilder_average(minus_dm, period)
 
-    plus_di = [None] * length
-    minus_di = [None] * length
-    dx = [None] * length
+    plus_di: list[Optional[float]] = [None] * length
+    minus_di: list[Optional[float]] = [None] * length
+    dx: list[Optional[float]] = [None] * length
 
     for i in range(length):
+        tr_value = smooth_tr[i]
+        plus_value = smooth_plus[i]
+        minus_value = smooth_minus[i]
+
         if (
-            smooth_tr[i] is None
-            or smooth_tr[i] == 0
-            or smooth_plus[i] is None
-            or smooth_minus[i] is None
+            tr_value is None
+            or tr_value <= 0
+            or plus_value is None
+            or minus_value is None
         ):
             continue
 
-        plus_di[i] = (
-            100.0 * smooth_plus[i] / smooth_tr[i]
-        )
-
-        minus_di[i] = (
-            100.0 * smooth_minus[i] / smooth_tr[i]
-        )
+        plus_di[i] = 100.0 * plus_value / tr_value
+        minus_di[i] = 100.0 * minus_value / tr_value
 
         denominator = plus_di[i] + minus_di[i]
 
-        if denominator != 0:
+        if denominator == 0:
+            dx[i] = 0.0
+        else:
             dx[i] = (
                 100.0
                 * abs(plus_di[i] - minus_di[i])
@@ -332,15 +330,16 @@ def adx(
 
 
 def vwap(
-    candles: list[Candle]
+    candles: list[Candle],
 ) -> list[Optional[float]]:
     """
-    Cumulative VWAP over the supplied candles.
+    Cumulative VWAP over supplied candles.
 
-    Note: This does not automatically reset at exchange sessions.
+    This function does not reset at exchange sessions.
+    Session anchoring requires a separate market-specific rule.
     """
 
-    result = []
+    result: list[Optional[float]] = []
 
     cumulative_volume = 0.0
     cumulative_value = 0.0
@@ -352,7 +351,7 @@ def vwap(
             + candle.close
         ) / 3.0
 
-        volume = max(candle.volume, 0.0)
+        volume = max(float(candle.volume), 0.0)
 
         cumulative_value += typical_price * volume
         cumulative_volume += volume
@@ -371,8 +370,14 @@ def supertrend(
     candles: list[Candle],
     period: int = 10,
     multiplier: float = 3.0,
-):
-    """Supertrend using Wilder ATR."""
+) -> dict:
+    """
+    Supertrend using Wilder ATR.
+
+    Internal direction convention:
+        1  = BULLISH
+        -1 = BEARISH
+    """
 
     if period <= 0 or multiplier <= 0:
         raise ValueError("Invalid Supertrend settings")
@@ -380,10 +385,10 @@ def supertrend(
     length = len(candles)
     atr_values = atr(candles, period)
 
-    upper_band = [None] * length
-    lower_band = [None] * length
-    trend = [None] * length
-    direction = [None] * length
+    upper_band: list[Optional[float]] = [None] * length
+    lower_band: list[Optional[float]] = [None] * length
+    trend: list[Optional[float]] = [None] * length
+    direction: list[Optional[int]] = [None] * length
 
     for i in range(length):
         current_atr = atr_values[i]
@@ -401,39 +406,53 @@ def supertrend(
         if i == 0 or upper_band[i - 1] is None:
             upper_band[i] = basic_upper
             lower_band[i] = basic_lower
-            direction[i] = 1
-            trend[i] = basic_lower
+
+            # Pine's initial direction is bearish.
+            # Convert it to this engine's internal convention.
+            direction[i] = -1
+            trend[i] = basic_upper
             continue
 
         previous_close = candles[i - 1].close
 
+        previous_upper = upper_band[i - 1]
+        previous_lower = lower_band[i - 1]
+
+        if previous_upper is None or previous_lower is None:
+            continue
+
         if (
-            basic_upper < upper_band[i - 1]
-            or previous_close > upper_band[i - 1]
+            basic_upper < previous_upper
+            or previous_close > previous_upper
         ):
             upper_band[i] = basic_upper
         else:
-            upper_band[i] = upper_band[i - 1]
+            upper_band[i] = previous_upper
 
         if (
-            basic_lower > lower_band[i - 1]
-            or previous_close < lower_band[i - 1]
+            basic_lower > previous_lower
+            or previous_close < previous_lower
         ):
             lower_band[i] = basic_lower
         else:
-            lower_band[i] = lower_band[i - 1]
+            lower_band[i] = previous_lower
 
-        if direction[i - 1] == 1:
-            direction[i] = (
-                -1
-                if candles[i].close < lower_band[i]
-                else 1
-            )
-        else:
+        previous_direction = direction[i - 1]
+
+        if previous_direction is None:
+            continue
+
+        if previous_direction == -1:
             direction[i] = (
                 1
                 if candles[i].close > upper_band[i]
                 else -1
+            )
+        else:
+            direction[i] = (
+                -1
+                if candles[i].close < lower_band[i]
+                else 1
             )
 
         trend[i] = (
@@ -451,11 +470,28 @@ def supertrend(
 
 
 def calculate_indicators(
-    candles: list[Candle]
+    candles: list[Candle],
 ) -> dict:
     """Calculate all V6 indicators."""
 
     closes = [candle.close for candle in candles]
+
+    macd_result = macd(closes)
+    adx_result = adx(candles)
+    supertrend_result = supertrend(candles)
+
+    return {
+        "ema_20": ema(closes, 20),
+        "ema_50": ema(closes, 50),
+        "ema_200": ema(closes, 200),
+        "rsi_14": rsi(closes, 14),
+        "atr_14": atr(candles, 14),
+        "macd": macd_result,
+        "adx": adx_result,
+        "vwap": vwap(candles),
+        "supertrend": supertrend_result,
+    }
+e for candle in candles]
 
     macd_result = macd(closes)
     adx_result = adx(candles)
