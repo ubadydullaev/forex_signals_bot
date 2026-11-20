@@ -82,6 +82,7 @@ class TestV6DataAdapter(unittest.TestCase):
 
         duplicate = raw[1].copy()
         duplicate["close"] += 10
+        duplicate["high"] += 20
         raw.append(duplicate)
 
         with patch.object(data_adapter, "MIN_CANDLES", 3):
