@@ -34,19 +34,16 @@ class TestV6MarketStructure(unittest.TestCase):
 
         return candles
 
-    # ======================================
     # SWING POINT TESTS
-    # ======================================
 
     def test_swing_high_detection(self):
-        
-     candles = self.make_candles([
-        (12, 8, 10),
-        (11, 7, 9),
-        (10, 5, 9),
-      ])
-
-
+        candles = self.make_candles([
+            (10, 5, 8),
+            (12, 6, 9),
+            (15, 7, 12),
+            (13, 6, 10),
+            (11, 5, 8),
+        ])
 
         swings = find_swing_points(
             candles,
@@ -118,9 +115,7 @@ class TestV6MarketStructure(unittest.TestCase):
         with self.assertRaises(ValueError):
             find_swing_points(candles, left=True, right=2)
 
-    # ======================================
     # TREND TESTS
-    # ======================================
 
     def test_bullish_trend_detection(self):
         swings = [
@@ -130,10 +125,7 @@ class TestV6MarketStructure(unittest.TestCase):
             SwingPoint(4, 4, 7, "LOW"),
         ]
 
-        self.assertEqual(
-            detect_trend(swings),
-            "BULLISH",
-        )
+        self.assertEqual(detect_trend(swings), "BULLISH")
 
     def test_bearish_trend_detection(self):
         swings = [
@@ -143,10 +135,7 @@ class TestV6MarketStructure(unittest.TestCase):
             SwingPoint(4, 4, 7, "LOW"),
         ]
 
-        self.assertEqual(
-            detect_trend(swings),
-            "BEARISH",
-        )
+        self.assertEqual(detect_trend(swings), "BEARISH")
 
     def test_ranging_trend_detection(self):
         swings = [
@@ -156,10 +145,7 @@ class TestV6MarketStructure(unittest.TestCase):
             SwingPoint(4, 4, 4, "LOW"),
         ]
 
-        self.assertEqual(
-            detect_trend(swings),
-            "RANGING",
-        )
+        self.assertEqual(detect_trend(swings), "RANGING")
 
     def test_unknown_trend_with_insufficient_swings(self):
         swings = [
@@ -167,14 +153,9 @@ class TestV6MarketStructure(unittest.TestCase):
             SwingPoint(2, 2, 5, "LOW"),
         ]
 
-        self.assertEqual(
-            detect_trend(swings),
-            "UNKNOWN",
-        )
+        self.assertEqual(detect_trend(swings), "UNKNOWN")
 
-    # ======================================
     # BOS AND CHOCH TESTS
-    # ======================================
 
     def test_bullish_bos_detection(self):
         candles = self.make_candles([
@@ -243,10 +224,8 @@ class TestV6MarketStructure(unittest.TestCase):
         )
 
         self.assertEqual(len(events), 2)
-
         self.assertEqual(events[0].event, "BOS")
         self.assertEqual(events[0].direction, "BULLISH")
-
         self.assertEqual(events[1].event, "CHOCH")
         self.assertEqual(events[1].direction, "BEARISH")
 
@@ -291,9 +270,7 @@ class TestV6MarketStructure(unittest.TestCase):
 
         self.assertEqual(events, [])
 
-    # ======================================
     # LIQUIDITY SWEEP TESTS
-    # ======================================
 
     def test_bearish_liquidity_sweep_detection(self):
         candles = self.make_candles([
@@ -320,7 +297,7 @@ class TestV6MarketStructure(unittest.TestCase):
         candles = self.make_candles([
             (12, 8, 10),
             (11, 7, 9),
-            (10, 5, 8),
+            (10, 5, 9),
         ])
 
         swings = [
@@ -378,9 +355,7 @@ class TestV6MarketStructure(unittest.TestCase):
 
         self.assertEqual(sweeps, [])
 
-    # ======================================
     # SUPPORT AND RESISTANCE TESTS
-    # ======================================
 
     def test_support_and_resistance(self):
         candles = self.make_candles([
@@ -417,9 +392,7 @@ class TestV6MarketStructure(unittest.TestCase):
         self.assertIsNone(levels["support"])
         self.assertIsNone(levels["resistance"])
 
-    # ======================================
     # COMPLETE ANALYSIS TESTS
-    # ======================================
 
     def test_empty_market_structure(self):
         result = analyze_market_structure([])
@@ -467,3 +440,4 @@ class TestV6MarketStructure(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+        
