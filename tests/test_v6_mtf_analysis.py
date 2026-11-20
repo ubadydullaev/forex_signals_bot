@@ -75,6 +75,7 @@ class TestV6MTFAnalysis(unittest.TestCase):
             places=2,
         )
 
+    
     def test_m30_opposition_prevents_lower_confirmation(self):
         result = self.run_with_trends({
             "D1": "BULLISH",
@@ -83,6 +84,15 @@ class TestV6MTFAnalysis(unittest.TestCase):
             "M30": "BEARISH",
             "M15": "BULLISH",
         })
+
+        self.assertTrue(result["higher_confirmation"])
+        self.assertFalse(result["lower_confirmation"])
+        self.assertAlmostEqual(
+            result["alignment_percent"],
+            8.5 / 9.5 * 100.0,
+            places=2,
+        )
+
 
         self.assertTrue(result["higher_confirmation"])
         self.assertFalse(result["lower_confirmation"])
