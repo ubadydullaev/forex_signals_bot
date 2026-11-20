@@ -8,12 +8,21 @@ SignalSide = Literal["BUY", "SELL", "HOLD"]
 
 @dataclass
 class Candle:
+    # Unix timestamp in UTC milliseconds (candle open time)
     timestamp: int
+
     open: float
     high: float
     low: float
     close: float
     volume: float = 0.0
+
+    # True only when the candle is fully closed
+    # False by default for safety
+    is_closed: bool = False
+
+    # Data provider identifier, e.g. binance_spot, mt5, tradingview
+    source: str = "unknown"
 
 
 @dataclass
@@ -44,4 +53,3 @@ class AnalysisResult:
     trend: str = "UNKNOWN"
     strength: float = 0.0
     reasons: tuple[str, ...] = ()
-  
