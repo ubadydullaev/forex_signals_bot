@@ -51,7 +51,7 @@ jobs:
               market = get_market_data(
                   symbol=symbol,
                   timeframe=timeframe,
-                  limit=220,
+                  limit=250,
               )
 
               print("Symbol:", market.symbol)
