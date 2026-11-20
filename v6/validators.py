@@ -18,24 +18,29 @@ def _is_finite_number(value) -> bool:
     )
 
 
+# ==========================================
+# MARKET DATA VALIDATION
+# ==========================================
+
 def validate_market_data(
     candles,
     minimum_candles: int = 200,
 ) -> ValidationResult:
-    """Check whether enough valid candle data is available."""
+    """Validate closed candles and normalized market data."""
 
     reasons = []
 
     if not candles:
-        return ValidationResult(
-            valid=False,
-            reasons=["Candle data is empty"],
-        )
+        return ValidationResult(False, ["Candle data is empty"])
 
-    if minimum_candles < 1:
+    if (
+        not isinstance(minimum_candles, int)
+        or isinstance(minimum_candles, bool)
+        or minimum_candles < 1
+    ):
         return ValidationResult(
-            valid=False,
-            reasons=["Minimum candle count must be positive"],
+            False,
+            ["Minimum candle count must be a positive integer"],
         )
 
     if len(candles) < minimum_candles:
@@ -46,6 +51,42 @@ def validate_market_data(
     timestamps = []
 
     for i, candle in enumerate(candles):
+
+        # Closed candle check
+        if not isinstance(candle.is_closed, bool):
+            reasons.append(
+                f"Invalid candle closed status at candle {i}"
+            )
+        elif not candle.is_closed:
+            reasons.append(
+                f"Unclosed candle found at candle {i}"
+            )
+
+        # Data source check
+        if (
+            not isinstance(candle.source, str)
+            or not candle.source.strip()
+            or candle.source.strip().lower() == "unknown"
+        ):
+            reasons.append(
+                f"Missing or unknown data source at candle {i}"
+            )
+
+        # UTC milliseconds timestamp check
+        timestamp = candle.timestamp
+
+        if (
+            not isinstance(timestamp, int)
+            or isinstance(timestamp, bool)
+            or timestamp < 100_000_000_000
+        ):
+            reasons.append(
+                f"Timestamp must be UTC milliseconds at candle {i}"
+            )
+        else:
+            timestamps.append(timestamp)
+
+        # OHLCV numeric validation
         values = (
             candle.open,
             candle.high,
@@ -54,23 +95,18 @@ def validate_market_data(
             candle.volume,
         )
 
-        if not all(_is_finite_number(v) for v in values):
+        if not all(_is_finite_number(value) for value in values):
             reasons.append(
                 f"Non-finite or invalid numeric value at candle {i}"
             )
             continue
 
-        if candle.timestamp < 0:
-            reasons.append(
-                f"Invalid timestamp at candle {i}"
-            )
-
-        if (
-            candle.open <= 0
-            or candle.high <= 0
-            or candle.low <= 0
-            or candle.close <= 0
-        ):
+        if min(
+            candle.open,
+            candle.high,
+            candle.low,
+            candle.close,
+        ) <= 0:
             reasons.append(
                 f"Prices must be positive at candle {i}"
             )
@@ -101,8 +137,7 @@ def validate_market_data(
                 f"Negative volume at candle {i}"
             )
 
-        timestamps.append(candle.timestamp)
-
+    # Timestamp order and duplicate checks
     if len(timestamps) == len(candles):
         if timestamps != sorted(timestamps):
             reasons.append(
@@ -119,6 +154,10 @@ def validate_market_data(
         reasons=reasons,
     )
 
+
+# ==========================================
+# STOP LOSS VALIDATION
+# ==========================================
 
 def validate_stop_loss(
     side: str,
@@ -142,6 +181,12 @@ def validate_stop_loss(
             ["Prices must be positive"],
         )
 
+    if side not in ("BUY", "SELL"):
+        return ValidationResult(
+            False,
+            ["Side must be BUY or SELL"],
+        )
+
     if side == "BUY" and stop_loss >= entry:
         return ValidationResult(
             False,
@@ -154,14 +199,12 @@ def validate_stop_loss(
             ["SELL stop-loss must be above entry"],
         )
 
-    if side not in ("BUY", "SELL"):
-        return ValidationResult(
-            False,
-            ["Side must be BUY or SELL"],
-        )
-
     return ValidationResult(True, [])
 
+
+# ==========================================
+# TAKE PROFIT VALIDATION
+# ==========================================
 
 def validate_take_profit(
     side: str,
@@ -185,6 +228,12 @@ def validate_take_profit(
             ["Prices must be positive"],
         )
 
+    if side not in ("BUY", "SELL"):
+        return ValidationResult(
+            False,
+            ["Side must be BUY or SELL"],
+        )
+
     if side == "BUY" and take_profit <= entry:
         return ValidationResult(
             False,
@@ -197,14 +246,12 @@ def validate_take_profit(
             ["SELL take-profit must be below entry"],
         )
 
-    if side not in ("BUY", "SELL"):
-        return ValidationResult(
-            False,
-            ["Side must be BUY or SELL"],
-        )
-
     return ValidationResult(True, [])
 
+
+# ==========================================
+# RISK / REWARD CALCULATION
+# ==========================================
 
 def calculate_risk_reward(
     side: str,
@@ -218,6 +265,9 @@ def calculate_risk_reward(
         _is_finite_number(value)
         for value in (entry, stop_loss, take_profit)
     ):
+        return None
+
+    if entry <= 0 or stop_loss <= 0 or take_profit <= 0:
         return None
 
     if side == "BUY":
@@ -234,7 +284,12 @@ def calculate_risk_reward(
     if risk <= 0 or reward <= 0:
         return None
 
-    return reward / risk
+    result = reward / risk
+
+    if not math.isfinite(result):
+        return None
+
+    return result
 
 
 def validate_risk_reward(
@@ -262,7 +317,7 @@ def validate_risk_reward(
         take_profit,
     )
 
-    if rr is None or not math.isfinite(rr):
+    if rr is None:
         return ValidationResult(
             False,
             ["Unable to calculate valid risk/reward"],
@@ -282,6 +337,10 @@ def validate_risk_reward(
         [f"Risk/reward accepted: {rr:.2f}"],
     )
 
+
+# ==========================================
+# ATR DISTANCE VALIDATION
+# ==========================================
 
 def validate_atr_distance(
     side: str,
@@ -332,6 +391,16 @@ def validate_atr_distance(
             ["Invalid ATR distance limits"],
         )
 
+    # Also verify correct stop-loss side
+    stop_validation = validate_stop_loss(
+        side,
+        entry,
+        stop_loss,
+    )
+
+    if not stop_validation.valid:
+        return stop_validation
+
     distance = abs(entry - stop_loss)
     atr_multiple = distance / atr_value
 
@@ -353,6 +422,10 @@ def validate_atr_distance(
     )
 
 
+# ==========================================
+# COMPLETE TRADE VALIDATION
+# ==========================================
+
 def validate_trade(
     side: str,
     entry: float,
@@ -364,8 +437,16 @@ def validate_trade(
     """Run all trade-level validation checks."""
 
     results = [
-        validate_stop_loss(side, entry, stop_loss),
-        validate_take_profit(side, entry, take_profit),
+        validate_stop_loss(
+            side,
+            entry,
+            stop_loss,
+        ),
+        validate_take_profit(
+            side,
+            entry,
+            take_profit,
+        ),
         validate_risk_reward(
             side,
             entry,
