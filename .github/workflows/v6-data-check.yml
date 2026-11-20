@@ -1,5 +1,5 @@
 
-name: V6 Data Adapter Check
+name: V6 Full Validation
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 jobs:
-  data-check:
+  v6-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -33,7 +33,10 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Check V6 Python syntax
-        run: python -m compileall -q v6
+        run: python -m compileall -q v6 tests
+
+      - name: Run V6 indicator unit tests
+        run: python -m unittest discover -s tests -p "test_v6_*.py" -v
 
       - name: Test all V6 instruments and timeframes
         run: |
@@ -78,7 +81,7 @@ jobs:
                       failed.append((symbol, timeframe, str(error)))
                       print("RESULT: FAILED", error, flush=True)
 
-          print("\n========== V6 DATA TEST SUMMARY ==========")
+          print("\n========== V6 FULL TEST SUMMARY ==========")
           print("Passed:", len(passed))
           print("Failed:", len(failed))
 
@@ -87,7 +90,7 @@ jobs:
               for symbol, timeframe, error in failed:
                   print(f"{symbol} {timeframe}: {error}")
 
-              raise SystemExit("V6 DATA CHECK FAILED")
+              raise SystemExit("V6 VALIDATION FAILED")
 
           print("\nALL 35 DATA TESTS PASSED")
           PY
