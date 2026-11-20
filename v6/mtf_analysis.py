@@ -19,15 +19,30 @@ TIMEFRAME_WEIGHTS = {
     "M15": 0.5,
 }
 
+DIRECTIONAL_TRENDS = ("BULLISH", "BEARISH")
+
 
 def _last_valid(values: list) -> Optional[float]:
-    """Return the latest non-None value."""
-
     for value in reversed(values):
         if value is not None:
             return float(value)
-
     return None
+
+
+def _empty_timeframe_result(timeframe: str) -> dict:
+    return {
+        "timeframe": timeframe,
+        "trend": "UNKNOWN",
+        "strength": 0.0,
+        "rsi": None,
+        "adx": None,
+        "ema_20": None,
+        "ema_50": None,
+        "ema_200": None,
+        "supertrend_direction": None,
+        "structure_trend": "UNKNOWN",
+        "reasons": ["No candle data"],
+    }
 
 
 def analyze_single_timeframe(
@@ -37,24 +52,12 @@ def analyze_single_timeframe(
     """
     Analyze one timeframe.
 
-    This function expects closed candles only.
-    It does not generate BUY or SELL signals.
+    This function does not generate BUY or SELL signals.
+    Only closed, validated market data should be supplied.
     """
 
     if not candles:
-        return {
-            "timeframe": timeframe,
-            "trend": "UNKNOWN",
-            "strength": 0.0,
-            "rsi": None,
-            "adx": None,
-            "ema_20": None,
-            "ema_50": None,
-            "ema_200": None,
-            "supertrend_direction": None,
-            "structure_trend": "UNKNOWN",
-            "reasons": ["No candle data"],
-        }
+        return _empty_timeframe_result(timeframe)
 
     indicators = calculate_indicators(candles)
 
@@ -63,13 +66,10 @@ def analyze_single_timeframe(
     ema200 = _last_valid(indicators["ema_200"])
 
     rsi_value = _last_valid(indicators["rsi_14"])
+    adx_value = _last_valid(indicators["adx"]["adx"])
 
-    adx_data = indicators["adx"]
-    adx_value = _last_valid(adx_data["adx"])
-
-    supertrend_data = indicators["supertrend"]
     supertrend_direction = _last_valid(
-        supertrend_data["direction"]
+        indicators["supertrend"]["direction"]
     )
 
     structure = analyze_market_structure(candles)
@@ -78,7 +78,7 @@ def analyze_single_timeframe(
     trend = "UNKNOWN"
     reasons = []
 
-    # EMA trend classification
+    # EMA directional classification
     if (
         ema20 is not None
         and ema50 is not None
@@ -95,29 +95,33 @@ def analyze_single_timeframe(
         else:
             trend = "RANGING"
             reasons.append("EMA alignment is mixed")
+    else:
+        reasons.append("EMA data incomplete")
 
-    # Supertrend confirmation
+    # Supertrend is a confirmation, not a replacement for EMA trend.
     if supertrend_direction == 1:
         reasons.append("Supertrend bullish")
     elif supertrend_direction == -1:
         reasons.append("Supertrend bearish")
+    else:
+        reasons.append("Supertrend unavailable")
 
-    # Market structure confirmation
+    # Market structure context
     if structure_trend != "UNKNOWN":
-        reasons.append(
-            f"Market structure: {structure_trend}"
-        )
+        reasons.append(f"Market structure: {structure_trend}")
+    else:
+        reasons.append("Market structure unavailable")
 
-    # Trend strength
-    strength = 0.0
-
-    if adx_value is not None:
-        strength = min(adx_value, 100.0)
+    strength = (
+        min(max(adx_value, 0.0), 100.0)
+        if adx_value is not None
+        else 0.0
+    )
 
     return {
         "timeframe": timeframe,
         "trend": trend,
-        "strength": strength,
+        "strength": round(strength, 2),
         "rsi": rsi_value,
         "adx": adx_value,
         "ema_20": ema20,
@@ -133,113 +137,95 @@ def analyze_mtf(
     candles_by_timeframe: dict[str, list[Candle]],
 ) -> dict:
     """
-    Combine D1, H4, H1, M30 and M15 analysis.
+    Combine configured timeframe analyses.
 
-    Higher timeframes have greater directional weight.
-    M30 and M15 are used as additional confirmations.
+    D1, H4 and H1 must agree for higher confirmation.
+    M30 must agree for lower confirmation.
+    M15 is checked separately by the signal engine.
 
-    This function does not create a trading signal.
+    Alignment is measured against the total configured weight.
+    Missing or UNKNOWN timeframes do not inflate alignment.
     """
 
     timeframe_results = {}
 
-    # Analyze every configured timeframe
     for timeframe in TIMEFRAMES:
-        candles = candles_by_timeframe.get(
+        candles = candles_by_timeframe.get(timeframe, [])
+
+        timeframe_results[timeframe] = analyze_single_timeframe(
+            candles,
             timeframe,
-            []
         )
 
-        timeframe_results[timeframe] = (
-            analyze_single_timeframe(
-                candles,
-                timeframe,
-            )
-        )
-
-    # Calculate weighted directional score
     bullish_score = 0.0
     bearish_score = 0.0
     available_weight = 0.0
+    total_weight = sum(
+        TIMEFRAME_WEIGHTS.get(timeframe, 1.0)
+        for timeframe in TIMEFRAMES
+    )
 
     for timeframe, result in timeframe_results.items():
-
-        weight = TIMEFRAME_WEIGHTS.get(
-            timeframe,
-            1.0
-        )
-
+        weight = TIMEFRAME_WEIGHTS.get(timeframe, 1.0)
         trend = result["trend"]
 
-        if trend == "UNKNOWN":
+        if trend not in DIRECTIONAL_TRENDS:
             continue
 
         available_weight += weight
 
         if trend == "BULLISH":
             bullish_score += weight
-
-        elif trend == "BEARISH":
+        else:
             bearish_score += weight
 
-    total_directional_score = (
-        bullish_score + bearish_score
-    )
-
-    if total_directional_score == 0:
+    if bullish_score == 0.0 and bearish_score == 0.0:
         overall_trend = "UNKNOWN"
         alignment = 0.0
 
     elif bullish_score > bearish_score:
         overall_trend = "BULLISH"
         alignment = (
-            bullish_score / total_directional_score
-        ) * 100.0
+            bullish_score / total_weight * 100.0
+            if total_weight
+            else 0.0
+        )
 
     elif bearish_score > bullish_score:
         overall_trend = "BEARISH"
         alignment = (
-            bearish_score / total_directional_score
-        ) * 100.0
+            bearish_score / total_weight * 100.0
+            if total_weight
+            else 0.0
+        )
 
     else:
         overall_trend = "RANGING"
-        alignment = 50.0
+        alignment = (
+            max(bullish_score, bearish_score)
+            / total_weight * 100.0
+            if total_weight
+            else 0.0
+        )
 
-    # Higher timeframe agreement
-    higher_timeframes = ["D1", "H4", "H1"]
-
-    higher_trends = [
-        timeframe_results[tf]["trend"]
-        for tf in higher_timeframes
-        if tf in timeframe_results
-    ]
+    # Higher timeframe agreement: all three must agree.
+    higher_timeframes = ("D1", "H4", "H1")
 
     higher_confirmation = (
-        len(higher_trends) == 3
+        overall_trend in DIRECTIONAL_TRENDS
         and all(
-            trend == overall_trend
-            for trend in higher_trends
+            timeframe in timeframe_results
+            and timeframe_results[timeframe]["trend"] == overall_trend
+            for timeframe in higher_timeframes
         )
-        and overall_trend in ("BULLISH", "BEARISH")
     )
 
-    # Lower timeframe confirmation
-    lower_timeframes = ["M30", "M15"]
-
-    lower_trends = [
-        timeframe_results[tf]["trend"]
-        for tf in lower_timeframes
-        if tf in timeframe_results
-    ]
-
+    # M30 confirms the higher-timeframe direction.
+    # M15 has its own entry confirmation in signal_engine.py.
+    m30_result = timeframe_results.get("M30", {})
     lower_confirmation = (
-        len(lower_trends) == 2
-        and all(
-            trend == overall_trend
-            for trend in lower_trends
-        )
-        and overall_trend in ("BULLISH", "BEARISH")
+        overall_trend in DIRECTIONAL_TRENDS
+        and m30_result.get("trend") == overall_trend
     )
 
     return {
@@ -248,8 +234,8 @@ def analyze_mtf(
         "bullish_score": round(bullish_score, 2),
         "bearish_score": round(bearish_score, 2),
         "available_weight": round(available_weight, 2),
+        "total_weight": round(total_weight, 2),
         "higher_confirmation": higher_confirmation,
         "lower_confirmation": lower_confirmation,
         "timeframes": timeframe_results,
-          }
-  
+    }
