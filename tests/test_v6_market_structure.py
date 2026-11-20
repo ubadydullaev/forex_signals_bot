@@ -39,13 +39,14 @@ class TestV6MarketStructure(unittest.TestCase):
     # ======================================
 
     def test_swing_high_detection(self):
-        candles = self.make_candles([
-            (10, 5, 8),
-            (11, 6, 9),
-            (15, 7, 12),
-            (12, 6, 9),
-            (11, 5, 8),
-        ])
+        
+     candles = self.make_candles([
+        (12, 8, 10),
+        (11, 7, 9),
+        (10, 5, 9),
+      ])
+
+
 
         swings = find_swing_points(
             candles,
