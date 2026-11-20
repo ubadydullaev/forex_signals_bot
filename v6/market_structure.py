@@ -5,18 +5,22 @@ from typing import Optional
 from .models import Candle
 
 
+# ==========================================
+# V6 MARKET STRUCTURE
+# ==========================================
+
 @dataclass
 class SwingPoint:
     index: int
     timestamp: int
     price: float
-    kind: str  # HIGH yoki LOW
+    kind: str
 
 
 @dataclass
 class StructureEvent:
-    event: str  # BOS yoki CHOCH
-    direction: str  # BULLISH yoki BEARISH
+    event: str
+    direction: str
     price: float
     timestamp: int
     level: float
@@ -24,22 +28,21 @@ class StructureEvent:
 
 @dataclass
 class LiquiditySweep:
-    direction: str  # BULLISH yoki BEARISH
+    direction: str
     timestamp: int
     swept_level: float
     close: float
 
+
+# ==========================================
+# SWING POINTS
+# ==========================================
 
 def find_swing_points(
     candles: list[Candle],
     left: int = 3,
     right: int = 3,
 ) -> list[SwingPoint]:
-    """
-    Confirmed swing highs and lows.
-
-    A point is confirmed only after `right` candles have closed.
-    """
 
     if left < 1 or right < 1:
         raise ValueError("left and right must be positive")
@@ -85,13 +88,13 @@ def find_swing_points(
     return sorted(points, key=lambda point: point.index)
 
 
+# ==========================================
+# TREND DETECTION
+# ==========================================
+
 def detect_trend(
     swing_points: list[SwingPoint],
 ) -> str:
-    """
-    Detect market trend using the latest two swing highs
-    and latest two swing lows.
-    """
 
     highs = [
         point.price
@@ -123,16 +126,18 @@ def detect_trend(
     return "RANGING"
 
 
+# ==========================================
+# BOS AND CHOCH
+# ==========================================
+
 def detect_structure_events(
     candles: list[Candle],
     swing_points: list[SwingPoint],
+    right: int = 3,
 ) -> list[StructureEvent]:
-    """
-    Detect confirmed BOS and CHOCH events.
 
-    A swing level is checked only after its confirmation.
-    A candle must close beyond the level.
-    """
+    if right < 1:
+        raise ValueError("right must be positive")
 
     events = []
 
@@ -148,8 +153,8 @@ def detect_structure_events(
         if point.kind == "LOW"
     ]
 
-    last_broken_high = None
-    last_broken_low = None
+    last_broken_high_index = -1
+    last_broken_low_index = -1
 
     current_structure = "UNKNOWN"
 
@@ -158,79 +163,82 @@ def detect_structure_events(
         available_highs = [
             point
             for point in highs
-            if point.index + 3 < i
+            if point.index + right < i
+            and point.index > last_broken_high_index
         ]
 
         available_lows = [
             point
             for point in lows
-            if point.index + 3 < i
+            if point.index + right < i
+            and point.index > last_broken_low_index
         ]
 
+        # Bullish break of structure
         if available_highs:
             candidate = available_highs[-1]
 
-            if (
-                last_broken_high is None
-                or candidate.index > last_broken_high.index
-            ):
-                if candle.close > candidate.price:
-                    event_type = (
-                        "CHOCH"
-                        if current_structure == "BEARISH"
-                        else "BOS"
+            if candle.close > candidate.price:
+
+                event_type = (
+                    "CHOCH"
+                    if current_structure == "BEARISH"
+                    else "BOS"
+                )
+
+                events.append(
+                    StructureEvent(
+                        event=event_type,
+                        direction="BULLISH",
+                        price=candle.close,
+                        timestamp=candle.timestamp,
+                        level=candidate.price,
                     )
+                )
 
-                    events.append(
-                        StructureEvent(
-                            event=event_type,
-                            direction="BULLISH",
-                            price=candle.close,
-                            timestamp=candle.timestamp,
-                            level=candidate.price,
-                        )
-                    )
+                current_structure = "BULLISH"
+                last_broken_high_index = candidate.index
 
-                    current_structure = "BULLISH"
-                    last_broken_high = candidate
-
+        # Bearish break of structure
         if available_lows:
             candidate = available_lows[-1]
 
-            if (
-                last_broken_low is None
-                or candidate.index > last_broken_low.index
-            ):
-                if candle.close < candidate.price:
-                    event_type = (
-                        "CHOCH"
-                        if current_structure == "BULLISH"
-                        else "BOS"
-                    )
+            if candle.close < candidate.price:
 
-                    events.append(
-                        StructureEvent(
-                            event=event_type,
-                            direction="BEARISH",
-                            price=candle.close,
-                            timestamp=candle.timestamp,
-                            level=candidate.price,
-                        )
-                    )
+                event_type = (
+                    "CHOCH"
+                    if current_structure == "BULLISH"
+                    else "BOS"
+                )
 
-                    current_structure = "BEARISH"
-                    last_broken_low = candidate
+                events.append(
+                    StructureEvent(
+                        event=event_type,
+                        direction="BEARISH",
+                        price=candle.close,
+                        timestamp=candle.timestamp,
+                        level=candidate.price,
+                    )
+                )
+
+                current_structure = "BEARISH"
+                last_broken_low_index = candidate.index
 
     return events
 
 
+# ==========================================
+# LIQUIDITY SWEEPS
+# ==========================================
+
 def detect_liquidity_sweeps(
     candles: list[Candle],
     swing_points: list[SwingPoint],
+    right: int = 3,
 ) -> list[LiquiditySweep]:
-    """
-    Detect wick sweeps followed by a close back inside the level.
-    """
+
+    if right < 1:
+        raise ValueError("right must be positive")
 
     sweeps = []
 
@@ -251,22 +259,19 @@ def detect_liquidity_sweeps(
         confirmed_highs = [
             point
             for point in highs
-            if point.index + 3 < i
+            if point.index + right < i
         ]
 
         confirmed_lows = [
             point
             for point in lows
-            if point.index + 3 < i
+            if point.index + right < i
         ]
 
         if confirmed_highs:
             level = confirmed_highs[-1].price
 
-            if (
-                candle.high > level
-                and candle.close < level
-            ):
+            if candle.high > level and candle.close < level:
                 sweeps.append(
                     LiquiditySweep(
                         direction="BEARISH",
@@ -279,10 +284,7 @@ def detect_liquidity_sweeps(
         if confirmed_lows:
             level = confirmed_lows[-1].price
 
-            if (
-                candle.low < level
-                and candle.close > level
-            ):
+            if candle.low < level and candle.close > level:
                 sweeps.append(
                     LiquiditySweep(
                         direction="BULLISH",
@@ -295,14 +297,15 @@ def detect_liquidity_sweeps(
     return sweeps
 
 
+# ==========================================
+# SUPPORT AND RESISTANCE
+# ==========================================
+
 def get_support_resistance(
     candles: list[Candle],
     swing_points: list[SwingPoint],
     current_price: Optional[float] = None,
 ) -> dict:
-    """
-    Return the nearest confirmed support and resistance.
-    """
 
     if current_price is None and candles:
         current_price = candles[-1].close
@@ -327,23 +330,21 @@ def get_support_resistance(
         and point.price > current_price
     ]
 
-    support = max(supports) if supports else None
-    resistance = min(resistances) if resistances else None
-
     return {
-        "support": support,
-        "resistance": resistance,
+        "support": max(supports) if supports else None,
+        "resistance": min(resistances) if resistances else None,
     }
 
+
+# ==========================================
+# COMPLETE ANALYSIS
+# ==========================================
 
 def analyze_market_structure(
     candles: list[Candle],
     left: int = 3,
     right: int = 3,
 ) -> dict:
-    """
-    Complete market structure analysis.
-    """
 
     if not candles:
         return {
@@ -368,11 +369,13 @@ def analyze_market_structure(
     events = detect_structure_events(
         candles,
         swing_points,
+        right=right,
     )
 
     sweeps = detect_liquidity_sweeps(
         candles,
         swing_points,
+        right=right,
     )
 
     levels = get_support_resistance(
@@ -386,5 +389,4 @@ def analyze_market_structure(
         "events": events,
         "liquidity_sweeps": sweeps,
         "levels": levels,
-          }
-  
+    }
