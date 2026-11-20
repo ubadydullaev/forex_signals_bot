@@ -44,7 +44,7 @@ TIMEFRAME_WEIGHTS = {
     "M30": 1.0,
     "M15": 0.5,
 }
-
+ALIGNMENT_TIMEFRAMES = ("D1", "H4", "H1", "M30")
 OUTPUT_DIR = "backtest_results"
 OUTPUT_FILE = os.path.join(OUTPUT_DIR, "v6_trades.csv")
 DIAGNOSTICS_FILE = os.path.join(OUTPUT_DIR, "v6_diagnostics.csv")
@@ -424,10 +424,19 @@ def analyze_cached_mtf(caches, indices):
     bullish_score = 0.0
     bearish_score = 0.0
 
-    total_weight = sum(
-        TIMEFRAME_WEIGHTS.get(tf, 1.0)
-        for tf in TIMEFRAMES
+        total_weight = sum(
+        TIMEFRAME_WEIGHTS[timeframe]
+        for timeframe in ALIGNMENT_TIMEFRAMES
     )
+
+    for timeframe in ALIGNMENT_TIMEFRAMES:
+        result = results[timeframe]
+        weight = TIMEFRAME_WEIGHTS[timeframe]
+
+        if result["trend"] == "BULLISH":
+            bullish_score += weight
+        elif result["trend"] == "BEARISH":
+            bearish_score += weight
 
     for timeframe, result in results.items():
         weight = TIMEFRAME_WEIGHTS.get(timeframe, 1.0)
