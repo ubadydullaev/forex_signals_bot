@@ -5953,8 +5953,12 @@
         "1906447505",
         "8678763398"
       ],
-      "notified_to": [],
-      "status": "OPEN",
+      "notified_to": [
+        "1867555949",
+        "1906447505",
+        "8678763398"
+      ],
+      "status": "SL_HIT",
       "diagnostics": {
         "score": 60,
         "adx": 37.08253431907098,
@@ -5972,7 +5976,8 @@
         "structure_buy": 20,
         "structure_sell": 60
       },
-      "created_at": "2026-11-20T02:31:19.416327+00:00"
+      "created_at": "2026-11-20T02:31:19.416327+00:00",
+      "result_candle_time": "2026-11-20T03:30:00+00:00"
     },
     "GBPUSD_M30_2026-11-20T02:00:00+00:00_SELL": {
       "symbol": "GBPUSD",
