@@ -46,7 +46,7 @@ jobs:
 
       - name: Run V6 analysis
         env:
-          V6_ENABLE_TELEGRAM: "false"
+          V6_ENABLE_TELEGRAM: "true"
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           CLOUDFLARE_WORKER_URL: ${{ secrets.CLOUDFLARE_WORKER_URL }}
