@@ -177,10 +177,81 @@ def _calculate_lookback_days(timeframe, limit):
 
 
 # ==========================================
+# EASTER DATE CALCULATION
+# ==========================================
+
+def _easter_sunday(year):
+    """
+    Gregorian Easter Sunday sanasini hisoblaydi.
+    """
+
+    a = year % 19
+    b = year // 100
+    c = year % 100
+    d = b // 4
+    e = b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i = c // 4
+    k = c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+
+    month = (h + l - 7 * m + 114) // 31
+    day = ((h + l - 7 * m + 114) % 31) + 1
+
+    return datetime(year, month, day).date()
+
+
+# ==========================================
 # MARKET CLOSURE CHECK
 # ==========================================
 
-def _is_expected_market_closure(timestamp, symbol):
+def _is_expected_market_closure(
+    timestamp,
+    symbol,
+    timeframe=None,
+):
+    """
+    Bozor yopiq bo'lgan vaqtlarni aniqlaydi.
+
+    D1:
+    - Shanba va yakshanba;
+    - Good Friday.
+
+    Intraday:
+    - Avvalgi sessiya vaqt qoidalari.
+    """
+
+    if symbol not in DUKASCOPY_SYMBOLS:
+        return False
+
+    # D1 shamlar UTC kuniga asoslanadi.
+    # Timestampni AQSH vaqtiga aylantirish D1 sanasini
+    # bir kun oldinga yoki orqaga surib yuborishi mumkin.
+    if timeframe == "D1":
+        utc_date = datetime.fromtimestamp(
+            timestamp / 1000,
+            tz=timezone.utc,
+        ).date()
+
+        # Dam olish kunlari.
+        if utc_date.weekday() >= 5:
+            return True
+
+        # Good Friday — Pasxa yakshanbasidan ikki kun oldin.
+        good_friday = (
+            _easter_sunday(utc_date.year)
+            - timedelta(days=2)
+        )
+
+        if utc_date == good_friday:
+            return True
+
+        return False
+
+    # Intraday sessiya tekshiruvi.
     if symbol in ("XAUUSD", "XAGUSD"):
         market_tz = ZoneInfo("America/New_York")
         close_time = dt_time(17, 0)
@@ -207,15 +278,19 @@ def _is_expected_market_closure(timestamp, symbol):
     weekday = local_dt.weekday()
     local_time = local_dt.time().replace(tzinfo=None)
 
+    # Shanba.
     if weekday == 5:
         return True
 
+    # Yakshanba, bozor ochilguncha.
     if weekday == 6:
         return local_time < open_time
 
+    # Juma, bozor yopilgandan keyin.
     if weekday == 4 and local_time >= close_time:
         return True
 
+    # Kunlik tanaffus.
     if close_time < open_time:
         if close_time <= local_time < open_time:
             return True
@@ -265,6 +340,8 @@ def _inspect_candle_gaps(
             round(difference / duration_ms) - 1,
         )
 
+        # Binance 24/7 bozor.
+        # Undagi uzilishlar doim tekshiriladi.
         if source == "binance_spot":
             gaps.append({
                 "from": previous.timestamp,
@@ -287,6 +364,7 @@ def _inspect_candle_gaps(
                 _is_expected_market_closure(
                     timestamp,
                     symbol,
+                    timeframe,
                 )
                 for timestamp in missing_timestamps
             )
@@ -745,7 +823,7 @@ def get_candles(
     Belgilangan instrument va timeframe uchun
     yopilgan Candle obyektlarini qaytaradi.
 
-    limit: 220 dan 7000 gacha.
+    limit: 220 dan 10000 gacha.
     """
 
     _validate_request(
