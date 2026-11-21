@@ -364,6 +364,21 @@ def analyze_one_symbol(symbol):
 
 def main():
     validate_environment()
+        if TELEGRAM_SELF_TEST:
+        if not TELEGRAM_ENABLED:
+            raise RuntimeError("Telegram yoqilmagan")
+
+        message = (
+            "✅ <b>FOREX SIGNALS V6 — TELEGRAM TEST</b>\n"
+            "Bot Telegram API bilan muvaffaqiyatli bog‘landi.\n"
+            "Bu faqat admin uchun bir martalik test xabari."
+        )
+        send_telegram(ADMIN_ID, message)
+        logger.info("[TELEGRAM SELF TEST OK]")
+        return {
+            "analyzed": 0, "buy": 0, "sell": 0, "hold": 0,
+            "failed": 0, "delivery_failed": 0, "sent": 1, "duplicates": 0,
+        }
 
     logger.info("=" * 60)
     logger.info("V6 UNIFIED RUNNER ISHGA TUSHDI")
@@ -373,6 +388,9 @@ def main():
     logger.info("=" * 60)
 
     if TELEGRAM_ENABLED:
+        TELEGRAM_SELF_TEST = (
+    os.getenv("V6_TELEGRAM_SELF_TEST", "false").lower() == "true"
+        )
         state, state_sha = load_state()
         users = get_users()
         if not users:
