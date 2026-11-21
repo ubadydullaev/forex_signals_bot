@@ -3,7 +3,11 @@ import unittest
 from unittest.mock import patch
 
 from v6.config import TIMEFRAMES
-from v6.mtf_analysis import analyze_mtf, TIMEFRAME_WEIGHTS
+from v6.mtf_analysis import (
+    analyze_mtf,
+    TIMEFRAME_WEIGHTS,
+    ALIGNMENT_TIMEFRAMES,
+)
 
 
 class TestV6MTFAnalysis(unittest.TestCase):
@@ -31,6 +35,7 @@ class TestV6MTFAnalysis(unittest.TestCase):
         }
 
     def run_with_trends(self, trends):
+
         def fake_analysis(candles, timeframe):
             return self.result(
                 timeframe,
@@ -50,8 +55,8 @@ class TestV6MTFAnalysis(unittest.TestCase):
         })
 
         expected = sum(
-            TIMEFRAME_WEIGHTS.get(timeframe, 1.0)
-            for timeframe in TIMEFRAMES
+            TIMEFRAME_WEIGHTS[timeframe]
+            for timeframe in ALIGNMENT_TIMEFRAMES
         )
 
         self.assertEqual(result["total_weight"], expected)
@@ -69,11 +74,7 @@ class TestV6MTFAnalysis(unittest.TestCase):
         self.assertEqual(result["overall_trend"], "BULLISH")
         self.assertTrue(result["higher_confirmation"])
         self.assertTrue(result["lower_confirmation"])
-        self.assertAlmostEqual(
-            result["alignment_percent"],
-            9.0 / 9.5 * 100.0,
-            places=2,
-        )
+        self.assertEqual(result["alignment_percent"], 100.0)
 
     def test_m30_opposition_prevents_lower_confirmation(self):
         result = self.run_with_trends({
@@ -87,9 +88,10 @@ class TestV6MTFAnalysis(unittest.TestCase):
         self.assertEqual(result["overall_trend"], "BULLISH")
         self.assertTrue(result["higher_confirmation"])
         self.assertFalse(result["lower_confirmation"])
+
         self.assertAlmostEqual(
             result["alignment_percent"],
-            8.5 / 9.5 * 100.0,
+            8.0 / 9.0 * 100.0,
             places=2,
         )
 
@@ -113,11 +115,7 @@ class TestV6MTFAnalysis(unittest.TestCase):
             "M15": "UNKNOWN",
         })
 
-        self.assertAlmostEqual(
-            result["alignment_percent"],
-            9.0 / 9.5 * 100.0,
-            places=2,
-        )
+        self.assertEqual(result["alignment_percent"], 100.0)
 
     def test_all_unknown_returns_unknown(self):
         result = self.run_with_trends({})
