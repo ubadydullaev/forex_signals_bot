@@ -20,7 +20,11 @@ REQUEST_TIMEOUT = 25
 MAX_STORED_SIGNALS = 1000
 
 TELEGRAM_ENABLED = (
-    os.getenv("V6_ENABLE_TELEGRAM", "false").lower() == "true"
+    os.getenv("V6_ENABLE_TELEGRAM", "false").strip().lower() == "true"
+)
+
+TELEGRAM_SELF_TEST = (
+    os.getenv("V6_TELEGRAM_SELF_TEST", "false").strip().lower() == "true"
 )
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -45,7 +49,7 @@ logger = logging.getLogger("V6")
 
 
 class StatePersistenceError(RuntimeError):
-    """Signal yuborildi, lekin yuborish holati saqlanmadi."""
+    """Signal yuborildi, ammo yuborish holati saqlanmadi."""
 
 
 def validate_environment():
@@ -53,47 +57,30 @@ def validate_environment():
         logger.info("Telegram dry-run rejimida.")
         return
 
-    required = {
-        "TELEGRAM_BOT_TOKEN": BOT_TOKEN,
-        "TELEGRAM_CHAT_ID": ADMIN_ID,
-        "CLOUDFLARE_WORKER_URL": WORKER_URL,
-        "WEBHOOK_SECRET": WEBHOOK_SECRET,
-        "GITHUB_TOKEN": GITHUB_TOKEN,
-        "GITHUB_REPOSITORY": GITHUB_REPOSITORY,
-    }
+    if TELEGRAM_SELF_TEST:
+        required = {
+            "TELEGRAM_BOT_TOKEN": BOT_TOKEN,
+            "TELEGRAM_CHAT_ID": ADMIN_ID,
+        }
+    else:
+        required = {
+            "TELEGRAM_BOT_TOKEN": BOT_TOKEN,
+            "TELEGRAM_CHAT_ID": ADMIN_ID,
+            "CLOUDFLARE_WORKER_URL": WORKER_URL,
+            "WEBHOOK_SECRET": WEBHOOK_SECRET,
+            "GITHUB_TOKEN": GITHUB_TOKEN,
+            "GITHUB_REPOSITORY": GITHUB_REPOSITORY,
+        }
 
-    missing = [key for key, value in required.items() if not value]
+    missing = [
+        name for name, value in required.items()
+        if not value
+    ]
+
     if missing:
         raise RuntimeError(
             "Yetishmayotgan sozlamalar: " + ", ".join(missing)
         )
-
-
-def get_users():
-    if not WORKER_URL or not WEBHOOK_SECRET or not ADMIN_ID:
-        raise RuntimeError("Worker yoki admin sozlamalari yetishmaydi")
-
-    response = session.get(
-        f"{WORKER_URL}/approved-users",
-        headers={"X-Worker-Secret": WEBHOOK_SECRET},
-        timeout=REQUEST_TIMEOUT,
-    )
-    response.raise_for_status()
-
-    payload = response.json()
-    users = payload.get("users", [])
-
-    if not isinstance(users, list):
-        raise RuntimeError("Worker users ro'yxatini noto'g'ri qaytardi")
-
-    normalized = {
-        str(user).strip()
-        for user in users
-        if user is not None and str(user).strip()
-    }
-    normalized.add(str(ADMIN_ID).strip())
-
-    return sorted(normalized)
 
 
 def send_telegram(chat_id, message):
@@ -111,13 +98,89 @@ def send_telegram(chat_id, message):
         },
         timeout=REQUEST_TIMEOUT,
     )
+
     response.raise_for_status()
 
     result = response.json()
+
     if not result.get("ok"):
-        raise RuntimeError(f"Telegram API xatosi: {result}")
+        raise RuntimeError(
+            "Telegram API xatosi: " + str(result)
+        )
 
     return True
+
+
+def run_telegram_self_test():
+    if not TELEGRAM_ENABLED:
+        raise RuntimeError(
+            "Telegram self-test uchun Telegram yoqilgan bo'lishi kerak."
+        )
+
+    if not ADMIN_ID:
+        raise RuntimeError("TELEGRAM_CHAT_ID mavjud emas.")
+
+    message = (
+        "✅ <b>FOREX SIGNALS V6 — TELEGRAM TEST</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "Bot Telegram API bilan muvaffaqiyatli bog'landi.\n"
+        "Admin chatiga test xabari yetkazildi.\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "<i>Bu diagnostika xabari. Savdo signali emas.</i>"
+    )
+
+    sent = send_telegram(ADMIN_ID, message)
+
+    if not sent:
+        raise RuntimeError("Telegram test xabari yuborilmadi.")
+
+    logger.info(
+        "[TELEGRAM SELF TEST OK] Test faqat admin chatiga yuborildi."
+    )
+
+    return {
+        "analyzed": 0,
+        "buy": 0,
+        "sell": 0,
+        "hold": 0,
+        "failed": 0,
+        "delivery_failed": 0,
+        "sent": 1,
+        "duplicates": 0,
+    }
+
+
+def get_users():
+    if not WORKER_URL or not WEBHOOK_SECRET or not ADMIN_ID:
+        raise RuntimeError(
+            "Worker yoki admin sozlamalari yetishmaydi."
+        )
+
+    response = session.get(
+        f"{WORKER_URL}/approved-users",
+        headers={"X-Worker-Secret": WEBHOOK_SECRET},
+        timeout=REQUEST_TIMEOUT,
+    )
+
+    response.raise_for_status()
+
+    payload = response.json()
+    users = payload.get("users", [])
+
+    if not isinstance(users, list):
+        raise RuntimeError(
+            "Worker users ro'yxatini noto'g'ri qaytardi."
+        )
+
+    normalized = {
+        str(user).strip()
+        for user in users
+        if user is not None and str(user).strip()
+    }
+
+    normalized.add(str(ADMIN_ID).strip())
+
+    return sorted(normalized)
 
 
 def state_url():
@@ -137,26 +200,34 @@ def github_headers():
 
 def validate_state(state):
     if not isinstance(state, dict):
-        raise RuntimeError("V6 state formati noto'g'ri")
+        raise RuntimeError("V6 state formati noto'g'ri.")
 
     signals = state.setdefault("signals", {})
+
     if not isinstance(signals, dict):
-        raise RuntimeError("V6 signals formati noto'g'ri")
+        raise RuntimeError("V6 signals formati noto'g'ri.")
 
     for key, record in signals.items():
         if not isinstance(key, str) or not isinstance(record, dict):
-            raise RuntimeError("V6 state ichida noto'g'ri signal yozuvi")
+            raise RuntimeError(
+                "V6 state ichida noto'g'ri signal yozuvi."
+            )
 
         delivered = record.get("delivered_to", [])
+
         if not isinstance(delivered, list):
-            raise RuntimeError("delivered_to ro'yxati noto'g'ri")
+            raise RuntimeError(
+                "delivered_to ro'yxati noto'g'ri."
+            )
 
     return state
 
 
 def load_state():
     if not GITHUB_TOKEN or not GITHUB_REPOSITORY:
-        raise RuntimeError("GitHub state sozlamalari yetishmaydi")
+        raise RuntimeError(
+            "GitHub state sozlamalari yetishmaydi."
+        )
 
     response = session.get(
         state_url(),
@@ -169,13 +240,16 @@ def load_state():
         return {"signals": {}}, None
 
     response.raise_for_status()
+
     data = response.json()
 
     try:
         raw = base64.b64decode(data["content"]).decode("utf-8")
         state = json.loads(raw)
     except (KeyError, ValueError, UnicodeDecodeError) as exc:
-        raise RuntimeError("GitHub state faylini o'qib bo'lmadi") from exc
+        raise RuntimeError(
+            "GitHub state faylini o'qib bo'lmadi."
+        ) from exc
 
     return validate_state(state), data["sha"]
 
@@ -204,13 +278,16 @@ def save_state(state, sha):
         json=payload,
         timeout=REQUEST_TIMEOUT,
     )
+
     response.raise_for_status()
 
     result = response.json()
     new_sha = (result.get("content") or {}).get("sha")
 
     if not new_sha:
-        raise RuntimeError("GitHub yangi state SHA qaytarmadi")
+        raise RuntimeError(
+            "GitHub yangi state SHA qaytarmadi."
+        )
 
     return new_sha
 
@@ -220,9 +297,10 @@ def make_signal_key(result, candles_by_timeframe):
     candles = candles_by_timeframe.get("M15", [])
 
     if not candles:
-        raise RuntimeError("M15 shamlar ro'yxati bo'sh")
+        raise RuntimeError("M15 shamlar ro'yxati bo'sh.")
 
     timestamp = candles[-1].timestamp
+
     return (
         f"{signal.symbol}|{signal.timeframe}",
         f"{timestamp}|{signal.side}",
@@ -234,6 +312,7 @@ def get_delivery_record(state, key, signature, users):
 
     if isinstance(old, dict) and old.get("signature") == signature:
         delivered = old.get("delivered_to", [])
+
         if not isinstance(delivered, list):
             delivered = []
 
@@ -246,7 +325,9 @@ def get_delivery_record(state, key, signature, users):
         return {
             "signature": signature,
             "target_users": list(users),
-            "delivered_to": sorted(delivered.intersection(set(users))),
+            "delivered_to": sorted(
+                delivered.intersection(set(users))
+            ),
         }
 
     return {
@@ -272,6 +353,7 @@ def format_price(symbol, value):
 
 def format_signal(result):
     signal = result.signal
+
     emoji = "🟢" if signal.side == "BUY" else "🔴"
 
     rr = (
@@ -310,23 +392,29 @@ def fetch_symbol_data(symbol):
     candles_by_timeframe = {}
 
     for timeframe in TIMEFRAMES:
-        logger.info("[DATA] %s %s yuklanmoqda", symbol, timeframe)
+        logger.info(
+            "[DATA] %s %s yuklanmoqda",
+            symbol,
+            timeframe,
+        )
 
         market = get_market_data(
             symbol=symbol,
             timeframe=timeframe,
             limit=CANDLE_LIMIT,
         )
+
         candles = market.candles
 
         if len(candles) < MINIMUM_CANDLES:
             raise RuntimeError(
-                f"{symbol} {timeframe}: shamlar yetarli emas ({len(candles)})"
+                f"{symbol} {timeframe}: shamlar yetarli emas "
+                f"({len(candles)})"
             )
 
         if not all(candle.is_closed for candle in candles):
             raise RuntimeError(
-                f"{symbol} {timeframe}: yopilmagan sham aniqlandi"
+                f"{symbol} {timeframe}: yopilmagan sham aniqlandi."
             )
 
         candles_by_timeframe[timeframe] = candles
@@ -364,21 +452,11 @@ def analyze_one_symbol(symbol):
 
 def main():
     validate_environment()
-        if TELEGRAM_SELF_TEST:
-        if not TELEGRAM_ENABLED:
-            raise RuntimeError("Telegram yoqilmagan")
 
-        message = (
-            "✅ <b>FOREX SIGNALS V6 — TELEGRAM TEST</b>\n"
-            "Bot Telegram API bilan muvaffaqiyatli bog‘landi.\n"
-            "Bu faqat admin uchun bir martalik test xabari."
-        )
-        send_telegram(ADMIN_ID, message)
-        logger.info("[TELEGRAM SELF TEST OK]")
-        return {
-            "analyzed": 0, "buy": 0, "sell": 0, "hold": 0,
-            "failed": 0, "delivery_failed": 0, "sent": 1, "duplicates": 0,
-        }
+    # Self-test oddiy signal tahlilidan oldin bajariladi.
+    # Bu rejimda Worker, state va bozor ma'lumotlari chaqirilmaydi.
+    if TELEGRAM_SELF_TEST:
+        return run_telegram_self_test()
 
     logger.info("=" * 60)
     logger.info("V6 UNIFIED RUNNER ISHGA TUSHDI")
@@ -388,13 +466,13 @@ def main():
     logger.info("=" * 60)
 
     if TELEGRAM_ENABLED:
-        TELEGRAM_SELF_TEST = (
-    os.getenv("V6_TELEGRAM_SELF_TEST", "false").lower() == "true"
-        )
         state, state_sha = load_state()
         users = get_users()
+
         if not users:
-            raise RuntimeError("Tasdiqlangan foydalanuvchilar topilmadi")
+            raise RuntimeError(
+                "Tasdiqlangan foydalanuvchilar topilmadi."
+            )
     else:
         state, state_sha = {"signals": {}}, None
         users = []
@@ -416,11 +494,16 @@ def main():
         try:
             result, candles_by_timeframe = analyze_one_symbol(symbol)
             stats["analyzed"] += 1
+
             signal = result.signal
 
             if signal.side == "HOLD":
                 stats["hold"] += 1
-                logger.info("[HOLD] %s | %s", symbol, signal.reason)
+                logger.info(
+                    "[HOLD] %s | %s",
+                    symbol,
+                    signal.reason,
+                )
                 continue
 
             if signal.side == "BUY":
@@ -436,12 +519,14 @@ def main():
                 result,
                 candles_by_timeframe,
             )
+
             record = get_delivery_record(
                 state,
                 key,
                 signature,
                 users,
             )
+
             message = format_signal(result)
 
             if not TELEGRAM_ENABLED:
@@ -456,13 +541,20 @@ def main():
 
             if not pending_users:
                 stats["duplicates"] += 1
-                logger.info("[DUPLICATE] %s %s", symbol, signal.side)
+                logger.info(
+                    "[DUPLICATE] %s %s",
+                    symbol,
+                    signal.side,
+                )
                 continue
 
             for user in pending_users:
                 try:
                     if not send_telegram(user, message):
-                        raise RuntimeError("Telegram yuborishni tasdiqlamadi")
+                        raise RuntimeError(
+                            "Telegram yuborishni tasdiqlamadi."
+                        )
+
                 except Exception:
                     stats["delivery_failed"] += 1
                     logger.exception(
@@ -476,22 +568,32 @@ def main():
                 record["delivered_to"] = sorted(
                     set(record["delivered_to"])
                 )
+
                 state["signals"][key] = record
 
                 try:
                     state_sha = save_state(state, state_sha)
+
                 except Exception as exc:
                     logger.exception("[STATE SAVE ERROR]")
+
                     raise StatePersistenceError(
                         "Signal yuborildi, lekin state saqlanmadi. "
                         "Takroriy yuborish xavfi sabab runner to'xtatildi."
                     ) from exc
 
                 stats["sent"] += 1
-                logger.info("[SENT] %s %s -> %s", symbol, signal.side, user)
+
+                logger.info(
+                    "[SENT] %s %s -> %s",
+                    symbol,
+                    signal.side,
+                    user,
+                )
 
         except StatePersistenceError:
             raise
+
         except Exception:
             stats["failed"] += 1
             logger.exception("[SYMBOL ERROR] %s", symbol)
@@ -500,6 +602,7 @@ def main():
         state["signals"] = dict(
             list(state["signals"].items())[-MAX_STORED_SIGNALS:]
         )
+
         state_sha = save_state(state, state_sha)
 
     logger.info("=" * 60)
@@ -511,6 +614,7 @@ def main():
 
 if __name__ == "__main__":
     final_stats = main()
+
     if final_stats["failed"] or final_stats["delivery_failed"]:
         logger.error("V6 xatoliklar bilan yakunlandi.")
         sys.exit(1)
