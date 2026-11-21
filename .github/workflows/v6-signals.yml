@@ -9,8 +9,7 @@ on:
         required: true
         default: false
         type: boolean
-      scheduled:
-      - cron: "*/15 * * * *"
+      
 
 permissions:
   contents: write
@@ -52,7 +51,8 @@ jobs:
 
       - name: Run V6 analysis
         env:
-          V6_ENABLE_TELEGRAM: "true"
+          V6_ENABLE_TELEGRAM: "true" 
+          V6_TELEGRAM_SELF_TEST: ${{ inputs.telegram_self_test }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           CLOUDFLARE_WORKER_URL: ${{ secrets.CLOUDFLARE_WORKER_URL }}
