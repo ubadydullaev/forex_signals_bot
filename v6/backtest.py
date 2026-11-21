@@ -359,62 +359,6 @@ class TimeframeCache:
 # TIMEFRAME ANALYSIS
 # ============================================================
 
-def analyze_cached_timeframe(cache, index, timeframe):
-    indicators = cache.indicators
-
-    ema20 = indicators["ema_20"][index]
-    ema50 = indicators["ema_50"][index]
-    ema200 = indicators["ema_200"][index]
-
-    rsi_value = indicators["rsi_14"][index]
-    adx_value = indicators["adx"]["adx"][index]
-    supertrend_direction = indicators["supertrend"]["direction"][index]
-
-    ema_trend = "UNKNOWN"
-    trend = "UNKNOWN"
-
-    if all(v is not None for v in (ema20, ema50, ema200)):
-        if ema20 > ema50 > ema200:
-            ema_trend = "BULLISH"
-        elif ema20 < ema50 < ema200:
-            ema_trend = "BEARISH"
-        else:
-            ema_trend = "RANGING"
-
-    if supertrend_direction == 1:
-        if ema_trend == "BULLISH":
-            trend = "BULLISH"
-        elif ema_trend == "BEARISH":
-            trend = "RANGING"
-
-    elif supertrend_direction == -1:
-        if ema_trend == "BEARISH":
-            trend = "BEARISH"
-        elif ema_trend == "BULLISH":
-            trend = "RANGING"
-
-    if ema_trend == "RANGING":
-        trend = "RANGING"
-
-    strength = (
-        min(max(adx_value, 0.0), 100.0)
-        if adx_value is not None else 0.0
-    )
-
-    return {
-        "timeframe": timeframe,
-        "trend": trend,
-        "strength": round(strength, 2),
-        "rsi": rsi_value,
-        "adx": adx_value,
-        "ema_20": ema20,
-        "ema_50": ema50,
-        "ema_200": ema200,
-        "supertrend_direction": supertrend_direction,
-        "structure_trend": cache.structure_trend(index),
-    }
-
-
 def analyze_cached_mtf(caches, indices):
     results = {
         tf: analyze_cached_timeframe(caches[tf], indices[tf], tf)
@@ -424,7 +368,7 @@ def analyze_cached_mtf(caches, indices):
     bullish_score = 0.0
     bearish_score = 0.0
 
-        total_weight = sum(
+    total_weight = sum(
         TIMEFRAME_WEIGHTS[timeframe]
         for timeframe in ALIGNMENT_TIMEFRAMES
     )
@@ -438,26 +382,24 @@ def analyze_cached_mtf(caches, indices):
         elif result["trend"] == "BEARISH":
             bearish_score += weight
 
-    for timeframe, result in results.items():
-        weight = TIMEFRAME_WEIGHTS.get(timeframe, 1.0)
-
-        if result["trend"] == "BULLISH":
-            bullish_score += weight
-        elif result["trend"] == "BEARISH":
-            bearish_score += weight
-
     if bullish_score == 0 and bearish_score == 0:
         overall_trend = "UNKNOWN"
         alignment = 0.0
+
     elif bullish_score > bearish_score:
         overall_trend = "BULLISH"
         alignment = bullish_score / total_weight * 100.0
+
     elif bearish_score > bullish_score:
         overall_trend = "BEARISH"
         alignment = bearish_score / total_weight * 100.0
+
     else:
         overall_trend = "RANGING"
-        alignment = max(bullish_score, bearish_score) / total_weight * 100.0
+        alignment = max(
+            bullish_score,
+            bearish_score,
+        ) / total_weight * 100.0
 
     higher_confirmation = (
         overall_trend in ("BULLISH", "BEARISH")
@@ -478,6 +420,7 @@ def analyze_cached_mtf(caches, indices):
         "higher_confirmation": higher_confirmation,
         "lower_confirmation": lower_confirmation,
     }
+
 
 
 # ============================================================
