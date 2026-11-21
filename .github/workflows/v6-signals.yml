@@ -2,9 +2,15 @@
 name: Forex V6 Signals
 
 on:
-  workflow_dispatch:
-  schedule:
-    - cron: "*/15 * * * *"
+    workflow_dispatch:
+     inputs:
+      telegram_self_test:
+        description: "Admin uchun Telegram test"
+        required: true
+        default: false
+        type: boolean
+      scheduled:
+      - cron: "*/15 * * * *"
 
 permissions:
   contents: write
