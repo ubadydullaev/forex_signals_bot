@@ -30,29 +30,119 @@ class TestV6DataAdapter(unittest.TestCase):
             source="dukascopy",
         )
 
-    def inspect(self, candles, symbol="XAUUSD", timeframe="M15"):
+    def inspect(
+        self,
+        candles,
+        symbol="XAUUSD",
+        timeframe="M15",
+        source="dukascopy",
+    ):
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             gaps = data_adapter._inspect_candle_gaps(
-                candles, timeframe, "dukascopy", symbol=symbol
+                candles,
+                timeframe,
+                source,
+                symbol=symbol,
             )
         return gaps, caught
+
+    # -----------------------------------------------------
+    # D1 GAP TESTS
+    # -----------------------------------------------------
+
+    def test_d1_23_hour_interval_is_ignored(self):
+        first = self.timestamp(2026, 3, 7, 22, 0)
+        second = self.timestamp(2026, 3, 8, 21, 0)
+
+        gaps, caught = self.inspect(
+            [self.candle(first), self.candle(second)],
+            timeframe="D1",
+        )
+
+        self.assertEqual(gaps, [])
+        self.assertEqual(len(caught), 0)
+
+    def test_d1_25_hour_interval_is_ignored(self):
+        first = self.timestamp(2026, 11, 1, 21, 0)
+        second = self.timestamp(2026, 11, 2, 22, 0)
+
+        gaps, caught = self.inspect(
+            [self.candle(first), self.candle(second)],
+            timeframe="D1",
+        )
+
+        self.assertEqual(gaps, [])
+        self.assertEqual(len(caught), 0)
+
+    def test_d1_friday_to_monday_is_ignored(self):
+        friday = self.timestamp(2026, 11, 20, 22, 0)
+        monday = self.timestamp(2026, 11, 23, 22, 0)
+
+        gaps, caught = self.inspect(
+            [self.candle(friday), self.candle(monday)],
+            timeframe="D1",
+        )
+
+        self.assertEqual(gaps, [])
+        self.assertEqual(len(caught), 0)
+
+    def test_d1_missing_weekday_still_warns(self):
+        monday = self.timestamp(2026, 11, 16, 22, 0)
+        wednesday = self.timestamp(2026, 11, 18, 22, 0)
+
+        gaps, caught = self.inspect(
+            [self.candle(monday), self.candle(wednesday)],
+            timeframe="D1",
+        )
+
+        self.assertEqual(len(gaps), 1)
+        self.assertEqual(len(caught), 1)
+        self.assertEqual(gaps[0]["missing_intervals"], 1)
+        self.assertEqual(
+            gaps[0]["missing_dates"],
+            ["2026-11-17"],
+        )
+
+    def test_d1_binance_gap_still_warns(self):
+        first = self.timestamp(2026, 11, 16, 0, 0)
+        second = self.timestamp(2026, 11, 19, 0, 0)
+
+        gaps, caught = self.inspect(
+            [self.candle(first), self.candle(second)],
+            symbol="BTCUSD",
+            timeframe="D1",
+            source="binance_spot",
+        )
+
+        self.assertEqual(len(gaps), 1)
+        self.assertEqual(len(caught), 1)
+
+    # -----------------------------------------------------
+    # EXISTING GAP TESTS
+    # -----------------------------------------------------
 
     def test_gold_daily_break_is_ignored(self):
         first = self.timestamp(2026, 11, 16, 21, 45)
         second = self.timestamp(2026, 11, 16, 23, 0)
+
         gaps, caught = self.inspect(
-            [self.candle(first), self.candle(second)], "XAUUSD"
+            [self.candle(first), self.candle(second)],
+            "XAUUSD",
         )
+
         self.assertEqual(gaps, [])
         self.assertEqual(len(caught), 0)
 
     def test_silver_daily_break_is_ignored(self):
         first = self.timestamp(2026, 11, 16, 21, 45)
         second = self.timestamp(2026, 11, 16, 23, 0)
+
         gaps, caught = self.inspect(
-            [self.candle(first), self.candle(second)], "XAGUSD"
+            [self.candle(first), self.candle(second)],
+            "XAGUSD",
         )
+
         self.assertEqual(gaps, [])
         self.assertEqual(len(caught), 0)
 
@@ -63,9 +153,12 @@ class TestV6DataAdapter(unittest.TestCase):
     def test_real_gold_weekday_gap_still_warns(self):
         first = self.timestamp(2026, 11, 17, 10, 0)
         second = self.timestamp(2026, 11, 17, 10, 45)
+
         gaps, caught = self.inspect(
-            [self.candle(first), self.candle(second)], "XAUUSD"
+            [self.candle(first), self.candle(second)],
+            "XAUUSD",
         )
+
         self.assertEqual(len(gaps), 1)
         self.assertEqual(len(caught), 1)
         self.assertEqual(gaps[0]["missing_intervals"], 2)
@@ -73,15 +166,19 @@ class TestV6DataAdapter(unittest.TestCase):
     def test_dukascopy_weekend_gap_is_ignored(self):
         friday = self.timestamp(2026, 11, 20, 22, 0)
         sunday = self.timestamp(2026, 11, 22, 23, 0)
+
         gaps, caught = self.inspect(
-            [self.candle(friday), self.candle(sunday)], "XAUUSD"
+            [self.candle(friday), self.candle(sunday)],
+            "XAUUSD",
         )
+
         self.assertEqual(gaps, [])
         self.assertEqual(len(caught), 0)
 
     def test_binance_weekday_gap_generates_warning(self):
         first = self.timestamp(2026, 11, 17, 10, 0)
         second = first + 45 * 60 * 1000
+
         candles = [
             data_adapter.Candle(
                 timestamp=first, open=2000, high=2005, low=1995,
@@ -94,18 +191,25 @@ class TestV6DataAdapter(unittest.TestCase):
                 source="binance_spot",
             ),
         ]
+
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             gaps = data_adapter._inspect_candle_gaps(
                 candles, "M15", "binance_spot", symbol="BTCUSD"
             )
+
         self.assertEqual(len(gaps), 1)
         self.assertEqual(len(caught), 1)
+
+    # -----------------------------------------------------
+    # CANDLE BUILD TESTS
+    # -----------------------------------------------------
 
     def make_raw_candles(self, count=3):
         base_timestamp = 1700000000000
         duration = 15 * 60 * 1000
         candles = []
+
         for i in range(count):
             price = 2000.0 + i
             candles.append({
@@ -116,6 +220,7 @@ class TestV6DataAdapter(unittest.TestCase):
                 "close": price + 2.0,
                 "volume": 100.0,
             })
+
         return candles
 
     def build(self, raw, limit=3):
@@ -130,6 +235,7 @@ class TestV6DataAdapter(unittest.TestCase):
     def test_valid_candles_are_returned(self):
         with patch.object(data_adapter, "MIN_CANDLES", 3):
             result = self.build(self.make_raw_candles(3))
+
         self.assertEqual(len(result), 3)
         self.assertTrue(all(c.is_closed for c in result))
         self.assertTrue(all(c.source == "binance_spot" for c in result))
@@ -137,22 +243,28 @@ class TestV6DataAdapter(unittest.TestCase):
     def test_invalid_ohlc_candle_is_rejected(self):
         raw = self.make_raw_candles(3)
         raw[1]["high"] = raw[1]["low"] - 10
+
         with patch.object(data_adapter, "MIN_CANDLES", 2):
             result = self.build(raw, limit=2)
+
         self.assertEqual(len(result), 2)
 
     def test_negative_volume_candle_is_rejected(self):
         raw = self.make_raw_candles(3)
         raw[1]["volume"] = -100.0
+
         with patch.object(data_adapter, "MIN_CANDLES", 2):
             result = self.build(raw, limit=2)
+
         self.assertEqual(len(result), 2)
 
     def test_identical_duplicate_is_removed(self):
         raw = self.make_raw_candles(3)
         raw.append(raw[1].copy())
+
         with patch.object(data_adapter, "MIN_CANDLES", 3):
             result = self.build(raw)
+
         self.assertEqual(len(result), 3)
 
     def test_conflicting_duplicate_is_rejected(self):
@@ -161,6 +273,7 @@ class TestV6DataAdapter(unittest.TestCase):
         duplicate["close"] += 10
         duplicate["high"] += 20
         raw.append(duplicate)
+
         with patch.object(data_adapter, "MIN_CANDLES", 3):
             with self.assertRaises(RuntimeError):
                 self.build(raw)
@@ -168,6 +281,7 @@ class TestV6DataAdapter(unittest.TestCase):
     def test_unclosed_future_candle_is_ignored(self):
         raw = self.make_raw_candles(3)
         future_timestamp = int(time.time() * 1000) + 86400000
+
         raw.append({
             "timestamp": future_timestamp,
             "open": 2000.0,
@@ -176,8 +290,10 @@ class TestV6DataAdapter(unittest.TestCase):
             "close": 2005.0,
             "volume": 100.0,
         })
+
         with patch.object(data_adapter, "MIN_CANDLES", 3):
             result = self.build(raw)
+
         self.assertEqual(len(result), 3)
 
     def test_insufficient_candles_raise_error(self):
@@ -189,10 +305,12 @@ class TestV6DataAdapter(unittest.TestCase):
         raw = self.make_raw_candles(3)
         duration = 15 * 60 * 1000
         raw[2]["timestamp"] += duration * 3
+
         with patch.object(data_adapter, "MIN_CANDLES", 3):
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
                 self.build(raw)
+
         self.assertTrue(
             any("uzilish" in str(w.message) for w in caught)
         )
@@ -205,13 +323,16 @@ class TestV6DataAdapter(unittest.TestCase):
         with self.assertRaises(ValueError):
             data_adapter._validate_request("XAUUSD", "M15", 10)
 
-    # Twelve Data sana-vaqt formatlari
+    # -----------------------------------------------------
+    # TWELVE DATA DATETIME TESTS
+    # -----------------------------------------------------
 
     def test_twelve_date_only_format(self):
         result = data_adapter._parse_twelve_datetime("2026-11-20")
         expected = int(datetime(
             2026, 11, 20, tzinfo=timezone.utc
         ).timestamp() * 1000)
+
         self.assertEqual(result, expected)
 
     def test_twelve_datetime_format(self):
@@ -221,6 +342,7 @@ class TestV6DataAdapter(unittest.TestCase):
         expected = int(datetime(
             2026, 11, 20, 14, 30, tzinfo=timezone.utc
         ).timestamp() * 1000)
+
         self.assertEqual(result, expected)
 
     def test_twelve_iso_z_format(self):
@@ -230,6 +352,7 @@ class TestV6DataAdapter(unittest.TestCase):
         expected = int(datetime(
             2026, 11, 20, 14, 30, tzinfo=timezone.utc
         ).timestamp() * 1000)
+
         self.assertEqual(result, expected)
 
     def test_twelve_timezone_offset_format(self):
@@ -239,6 +362,7 @@ class TestV6DataAdapter(unittest.TestCase):
         expected = int(datetime(
             2026, 11, 20, 14, 30, tzinfo=timezone.utc
         ).timestamp() * 1000)
+
         self.assertEqual(result, expected)
 
     def test_twelve_empty_datetime_rejected(self):
