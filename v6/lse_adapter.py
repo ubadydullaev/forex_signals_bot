@@ -54,7 +54,6 @@ COMMODITY_SEARCH = {
     },
 }
 
-
 _client = None
 _resolved_symbols = {}
 
@@ -94,7 +93,6 @@ def _parse_timestamp(value):
     if isinstance(value, (int, float)):
         timestamp = int(value)
 
-        # Unix seconds bo'lsa milliseconds ga aylantiramiz.
         if timestamp < 100_000_000_000:
             timestamp *= 1000
 
@@ -139,7 +137,7 @@ def _resolve_commodity_symbol(client, symbol):
         )
 
     try:
-        response = client.pairs(
+        response = client.pair_page(
             settings["market"],
             q=settings["query"],
             limit=100,
@@ -190,7 +188,6 @@ def _resolve_commodity_symbol(client, symbol):
             f"LSE katalogida {symbol} uchun mos ticker topilmadi"
         )
 
-    # Avval XAU/XAG kodi aniq mos kelgan instrumentni tanlaymiz.
     code = "XAU" if symbol == "XAUUSD" else "XAG"
 
     exact = [
@@ -250,7 +247,6 @@ def _normalize_rows(rows, symbol, timeframe):
                 item.get("timestamp")
             )
 
-            # Joriy, hali yopilmagan shamni tashlab ketamiz.
             if timestamp + duration_ms > now_ms:
                 continue
 
@@ -395,4 +391,3 @@ def get_lse_candles(symbol, timeframe, limit=250):
     )
 
     return candles
-          
