@@ -13,7 +13,7 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - name: Check all native ForexSB timeframes
+      - name: Test ForexSB data
         run: |
           python - <<'PY'
           import gzip
@@ -24,22 +24,67 @@ jobs:
 
           BASE = "https://data.forexsb.com/datafeed"
           EPOCH = datetime(2000, 1, 1, tzinfo=timezone.utc)
+
           SYMBOLS = ["XAUUSD", "XAGUSD", "EURUSD", "GBPUSD"]
-          PERIODS = {
-              "M15": ("m15", 15),
-              "M30": ("m30", 30),
-              "H1": ("h1", 60),
-              "H4": ("h4", 240),
-              "D1": ("d1", 1440),
-          }
+          NATIVE = {"M15": 15, "M30": 30}
+          DERIVED = {"H1": 60, "H4": 240, "D1": 1440}
 
           def download(url):
               req = urllib.request.Request(
-                  url,
-                  headers={"User-Agent": "Mozilla/5.0"}
+                  url, headers={"User-Agent": "Mozilla/5.0"}
               )
-              with urllib.request.urlopen(req, timeout=90) as response:
-                  return response.read()
+              with urllib.request.urlopen(req, timeout=90) as r:
+                  return r.read()
+
+          def load_bars(symbol, period, scale, now):
+              url = f"{BASE}/data/dukascopy/{symbol}{period}.lb.gz"
+              raw = gzip.decompress(download(url))
+
+              if not raw or len(raw) % 28:
+                  raise RuntimeError(f"{symbol} {period}: noto'g'ri binary format")
+
+              bars = []
+              for offset in range(0, len(raw), 28):
+                  minute, op, hi, lo, cl, vol, spread = struct.unpack_from(
+                      "<7i", raw, offset
+                  )
+                  stamp = EPOCH + timedelta(minutes=minute)
+
+                  if stamp + timedelta(minutes=period) > now:
+                      continue
+
+                  o, h, l, c = op/scale, hi/scale, lo/scale, cl/scale
+                  if l > 0 and h >= l and l <= o <= h and l <= c <= h:
+                      bars.append({
+                          "time": stamp,
+                          "open": o, "high": h, "low": l, "close": c,
+                          "volume": vol
+                      })
+
+              bars.sort(key=lambda x: x["time"])
+              return bars
+
+          def aggregate(bars, minutes):
+              groups = {}
+              for bar in bars:
+                  epoch_minutes = int(
+                      (bar["time"] - EPOCH).total_seconds() // 60
+                  )
+                  bucket = (epoch_minutes // minutes) * minutes
+                  groups.setdefault(bucket, []).append(bar)
+
+              result = []
+              for bucket, items in sorted(groups.items()):
+                  items.sort(key=lambda x: x["time"])
+                  result.append({
+                      "time": EPOCH + timedelta(minutes=bucket),
+                      "open": items[0]["open"],
+                      "high": max(x["high"] for x in items),
+                      "low": min(x["low"] for x in items),
+                      "close": items[-1]["close"],
+                      "volume": sum(x["volume"] for x in items)
+                  })
+              return result
 
           print("Metadata yuklanmoqda...")
           metadata = json.loads(gzip.decompress(
@@ -55,66 +100,36 @@ jobs:
                   raise RuntimeError(f"{symbol}: metadata topilmadi")
 
               scale = float(info["priceScale"])
-              print(f"\n--- {symbol} | priceScale={scale} ---")
+              print(f"\n--- {symbol} | scale={scale} ---")
 
-              for timeframe, (period, minutes) in PERIODS.items():
-                  url = (
-                      f"{BASE}/data/dukascopy/"
-                      f"{symbol}{period}.lb.gz"
-                  )
+              m15 = load_bars(symbol, 15, scale, now)
+              m30 = load_bars(symbol, 30, scale, now)
 
-                  try:
-                      raw = gzip.decompress(download(url))
-                  except Exception as error:
+              datasets = {
+                  "M15": m15,
+                  "M30": m30,
+              }
+
+              for tf, minutes in DERIVED.items():
+                  datasets[tf] = aggregate(m30, minutes)
+
+              for tf, bars in datasets.items():
+                  if len(bars) < 220:
                       raise RuntimeError(
-                          f"{symbol} {timeframe}: yuklash xatosi: {error}"
+                          f"{symbol} {tf}: {len(bars)}/220 sham"
                       )
 
-                  if not raw or len(raw) % 28 != 0:
-                      raise RuntimeError(
-                          f"{symbol} {timeframe}: binary format noto'g'ri"
-                      )
-
-                  rows = []
-                  for offset in range(0, len(raw), 28):
-                      values = struct.unpack_from("<7i", raw, offset)
-                      minute, op, hi, lo, cl, volume, spread = values
-                      stamp = EPOCH + timedelta(minutes=minute)
-
-                      if stamp + timedelta(minutes=minutes) > now:
-                          continue
-
-                      o, h, l, c = (
-                          op / scale, hi / scale,
-                          lo / scale, cl / scale
-                      )
-
-                      if (
-                          l > 0 and h >= l
-                          and l <= o <= h
-                          and l <= c <= h
-                      ):
-                          rows.append(stamp)
-
-                  rows.sort()
-                  if len(rows) < 220:
-                      raise RuntimeError(
-                          f"{symbol} {timeframe}: "
-                          f"{len(rows)}/220 sham"
-                      )
-
-                  age = now - rows[-1]
+                  age = now - bars[-1]["time"]
                   if age > timedelta(days=3):
                       raise RuntimeError(
-                          f"{symbol} {timeframe}: "
-                          f"ma'lumot eskirgan: {age}"
+                          f"{symbol} {tf}: ma'lumot eskirgan: {age}"
                       )
 
                   print(
-                      f"OK {symbol} {timeframe}: "
-                      f"{len(rows)} sham | oxirgisi {rows[-1]}"
+                      f"OK {symbol} {tf}: {len(bars)} sham | "
+                      f"oxirgisi {bars[-1]['time']}"
                   )
                   total += 1
 
-          print(f"\nSUCCESS: {total}/20 native timeframe tekshiruvi o'tdi.")
+          print(f"\nSUCCESS: {total}/20 timeframe tekshiruvi o'tdi.")
           PY
