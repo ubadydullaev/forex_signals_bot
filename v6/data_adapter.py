@@ -807,7 +807,7 @@ def _fetch_twelve_data_with_cache(symbol, timeframe, limit):
 
 
 # =========================================================
-# LSE FALLBACK
+# LSE
 # =========================================================
 
 def _fetch_lse(symbol, timeframe, limit):
@@ -853,8 +853,8 @@ def _fetch_lse(symbol, timeframe, limit):
 def get_candles(symbol, timeframe, limit=1000):
     """
     Forex/metals:
-        1. Dukascopy
-        2. LSE
+        1. LSE
+        2. Dukascopy
         3. Twelve Data
 
     Crypto:
@@ -871,19 +871,6 @@ def get_candles(symbol, timeframe, limit=1000):
             f"{symbol} uchun ma'lumot manbasi aniqlanmagan"
         )
 
-    dukascopy_error = None
-
-    try:
-        return _fetch_dukascopy(symbol, timeframe, limit)
-
-    except Exception as error:
-        dukascopy_error = error
-        warnings.warn(
-            f"Dukascopy {symbol} {timeframe} ishlamadi. "
-            f"LSE fallback ishga tushadi: {error}",
-            RuntimeWarning,
-        )
-
     lse_error = None
 
     try:
@@ -893,6 +880,19 @@ def get_candles(symbol, timeframe, limit=1000):
         lse_error = error
         warnings.warn(
             f"LSE {symbol} {timeframe} ishlamadi. "
+            f"Dukascopy fallback ishga tushadi: {error}",
+            RuntimeWarning,
+        )
+
+    dukascopy_error = None
+
+    try:
+        return _fetch_dukascopy(symbol, timeframe, limit)
+
+    except Exception as error:
+        dukascopy_error = error
+        warnings.warn(
+            f"Dukascopy {symbol} {timeframe} ishlamadi. "
             f"Twelve Data fallback ishga tushadi: {error}",
             RuntimeWarning,
         )
@@ -900,7 +900,7 @@ def get_candles(symbol, timeframe, limit=1000):
     if symbol not in TWELVE_DATA_SYMBOLS:
         raise RuntimeError(
             f"{symbol} uchun barcha manbalar ishlamadi. "
-            f"Dukascopy: {dukascopy_error}. LSE: {lse_error}"
+            f"LSE: {lse_error}. Dukascopy: {dukascopy_error}"
         )
 
     try:
@@ -913,8 +913,8 @@ def get_candles(symbol, timeframe, limit=1000):
     except Exception as twelve_error:
         raise RuntimeError(
             f"{symbol} {timeframe}: barcha manbalar ishlamadi. "
-            f"Dukascopy: {dukascopy_error}. "
             f"LSE: {lse_error}. "
+            f"Dukascopy: {dukascopy_error}. "
             f"Twelve Data: {twelve_error}"
         ) from twelve_error
 
