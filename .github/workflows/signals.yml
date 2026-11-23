@@ -1,15 +1,89 @@
 
-name: Legacy Signals - DISABLED
+
+name: Forex V6 Signals
 
 on:
   workflow_dispatch:
+    inputs:
+      telegram_self_test:
+        description: "Faqat admin chatiga Telegram test xabari"
+        required: true
+        default: false
+        type: boolean
+
+  schedule:
+    - cron: "*/5 * * * *"
 
 permissions:
-  contents: read
+  contents: write
+  actions: write
+
+concurrency:
+  group: forex-v6-signals
+  cancel-in-progress: false
 
 jobs:
-  disabled:
+  scan:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+
     steps:
-      - name: Legacy signal sender disabled
-        run: echo "Legacy signal sending is disabled. Use V6 only."
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Dukascopy
+        run: npm install --no-save dukascopy-node@1.51.1
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore V6 market-data cache
+        uses: actions/cache/restore@v4
+        with:
+          path: v6/.market_data_cache.json
+          key: ${{ runner.os }}-v6-market-cache-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ${{ runner.os }}-v6-market-cache-
+
+      - name: Check V6 syntax
+        run: python -m compileall -q v6
+
+      - name: Run V6 tests
+        run: python -m unittest discover -s tests -p "test_v6_*.py" -v
+
+      - name: Run V6 analysis
+        env:
+          V6_ENABLE_TELEGRAM: "true"
+          V6_TELEGRAM_SELF_TEST: ${{ github.event_name == 'workflow_dispatch' && inputs.telegram_self_test || false }}
+
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+          LSE_API_KEY: ${{ secrets.LSE_API_KEY }}
+          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+
+          CLOUDFLARE_WORKER_URL: ${{ secrets.CLOUDFLARE_WORKER_URL }}
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+
+        run: python -m v6.runner
+
+      - name: Save V6 market-data cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: v6/.market_data_cache.json
+          key: ${{ runner.os }}-v6-market-cache-${{ github.run_id }}-${{ github.run_attempt }}
