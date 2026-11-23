@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: forex-v6-signals
@@ -45,6 +46,14 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
+      - name: Restore V6 market-data cache
+        uses: actions/cache/restore@v4
+        with:
+          path: v6/.market_data_cache.json
+          key: ${{ runner.os }}-v6-market-cache-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ${{ runner.os }}-v6-market-cache-
+
       - name: Check V6 syntax
         run: python -m compileall -q v6
 
@@ -60,6 +69,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
           TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+
           CLOUDFLARE_WORKER_URL: ${{ secrets.CLOUDFLARE_WORKER_URL }}
           WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
 
@@ -68,3 +78,10 @@ jobs:
           GITHUB_REF_NAME: ${{ github.ref_name }}
 
         run: python -m v6.runner
+
+      - name: Save V6 market-data cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: v6/.market_data_cache.json
+          key: ${{ runner.os }}-v6-market-cache-${{ github.run_id }}-${{ github.run_attempt }}
