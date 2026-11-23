@@ -17,12 +17,6 @@ from .config import SYMBOLS, TIMEFRAMES
 from .lse_adapter import get_lse_candles
 
 
-# =========================================================
-# V6 MARKET DATA ADAPTER
-# Forex/metals: Dukascopy -> LSE -> Twelve Data
-# Crypto: Binance
-# =========================================================
-
 BINANCE_URL = "https://data-api.binance.vision/api/v3/klines"
 TWELVE_DATA_URL = "https://api.twelvedata.com/time_series"
 
@@ -664,8 +658,16 @@ def _wait_twelve_data_rate_limit():
 
 
 def _parse_twelve_datetime(value):
-    parsed = datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
-    parsed = parsed.replace(tzinfo=timezone.utc)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("Twelve Data datetime mavjud emas")
+
+    parsed = datetime.fromisoformat(
+        value.strip().replace("Z", "+00:00")
+    )
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+
     return int(parsed.timestamp() * 1000)
 
 
@@ -696,11 +698,30 @@ def _fetch_twelve_data(symbol, timeframe, limit):
             },
             timeout=REQUEST_TIMEOUT,
         )
-        response.raise_for_status()
+
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as error:
+            status_code = (
+                response.status_code
+                if response is not None
+                else "unknown"
+            )
+            response_body = (
+                response.text[:500]
+                if response is not None and response.text
+                else "Javob matni bo'sh"
+            )
+            raise RuntimeError(
+                f"Twelve Data HTTP {status_code}: {response_body}"
+            ) from error
+
         payload = response.json()
 
     except requests.RequestException as error:
-        raise RuntimeError(f"Twelve Data ulanish xatosi: {error}") from error
+        raise RuntimeError(
+            f"Twelve Data ulanish xatosi: {type(error).__name__}"
+        ) from error
 
     except ValueError as error:
         raise RuntimeError(
