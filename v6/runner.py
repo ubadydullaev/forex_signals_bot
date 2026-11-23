@@ -22,7 +22,6 @@ MAX_STORED_SIGNALS = 1000
 TELEGRAM_ENABLED = (
     os.getenv("V6_ENABLE_TELEGRAM", "false").strip().lower() == "true"
 )
-
 TELEGRAM_SELF_TEST = (
     os.getenv("V6_TELEGRAM_SELF_TEST", "false").strip().lower() == "true"
 )
@@ -100,7 +99,6 @@ def send_telegram(chat_id, message):
     )
 
     response.raise_for_status()
-
     result = response.json()
 
     if not result.get("ok"):
@@ -163,7 +161,6 @@ def get_users():
     )
 
     response.raise_for_status()
-
     payload = response.json()
     users = payload.get("users", [])
 
@@ -240,7 +237,6 @@ def load_state():
         return {"signals": {}}, None
 
     response.raise_for_status()
-
     data = response.json()
 
     try:
@@ -280,7 +276,6 @@ def save_state(state, sha):
     )
 
     response.raise_for_status()
-
     result = response.json()
     new_sha = (result.get("content") or {}).get("sha")
 
@@ -352,6 +347,7 @@ def format_price(symbol, value):
 
 
 def format_signal(result):
+    """Admin uchun to'liq signal."""
     signal = result.signal
 
     emoji = "🟢" if signal.side == "BUY" else "🔴"
@@ -386,6 +382,29 @@ def format_signal(result):
         f"━━━━━━━━━━━━━━━━━━\n"
         f"<i>V6 avtomatik tahlili. Bu foyda kafolati emas.</i>"
     )
+
+
+def format_public_signal(result):
+    """Boshqa foydalanuvchilar uchun faqat savdo parametrlari."""
+    signal = result.signal
+
+    emoji = "🟢" if signal.side == "BUY" else "🔴"
+
+    return (
+        f"{emoji} <b>{html.escape(signal.symbol)} "
+        f"{html.escape(signal.side)}</b>\n"
+        f"Kirish: <code>{format_price(signal.symbol, signal.entry)}</code>\n"
+        f"SL: <code>{format_price(signal.symbol, signal.stop_loss)}</code>\n"
+        f"TP: <code>{format_price(signal.symbol, signal.take_profit)}</code>"
+    )
+
+
+def format_signal_for_user(result, user_id):
+    """Admin va boshqa foydalanuvchilar uchun alohida format."""
+    if str(user_id).strip() == str(ADMIN_ID).strip():
+        return format_signal(result)
+
+    return format_public_signal(result)
 
 
 def fetch_symbol_data(symbol):
@@ -453,8 +472,6 @@ def analyze_one_symbol(symbol):
 def main():
     validate_environment()
 
-    # Self-test oddiy signal tahlilidan oldin bajariladi.
-    # Bu rejimda Worker, state va bozor ma'lumotlari chaqirilmaydi.
     if TELEGRAM_SELF_TEST:
         return run_telegram_self_test()
 
@@ -527,10 +544,11 @@ def main():
                 users,
             )
 
-            message = format_signal(result)
-
             if not TELEGRAM_ENABLED:
-                logger.info("[DRY RUN]\n%s", message)
+                logger.info(
+                    "[DRY RUN]\n%s",
+                    format_signal(result),
+                )
                 continue
 
             pending_users = [
@@ -550,6 +568,8 @@ def main():
 
             for user in pending_users:
                 try:
+                    message = format_signal_for_user(result, user)
+
                     if not send_telegram(user, message):
                         raise RuntimeError(
                             "Telegram yuborishni tasdiqlamadi."
