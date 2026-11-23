@@ -350,7 +350,7 @@ def analyze_symbol(
     )
 
     confidence = min(
-        95.0,
+        85.0,
         alignment * 0.7
         + min(adx_for_confidence, 50.0) * 0.6,
     )
