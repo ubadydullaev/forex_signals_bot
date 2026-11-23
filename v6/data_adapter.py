@@ -214,6 +214,16 @@ def _is_expected_market_closure(timestamp, symbol, timeframe=None):
 # =========================================================
 
 def _inspect_candle_gaps(candles, timeframe, source, symbol=None):
+def _is_expected_d1_closure(market_date):
+    """Forex/metall D1 shamlarida savdo bo'lmaydigan sanalarni aniqlaydi."""
+    if market_date.weekday() >= 5:
+        return True
+
+    good_friday = _easter_sunday(market_date.year) - timedelta(days=2)
+    return market_date == good_friday
+
+
+def _inspect_candle_gaps(candles, timeframe, source, symbol=None):
     if len(candles) < 2:
         return []
 
@@ -227,6 +237,59 @@ def _inspect_candle_gaps(candles, timeframe, source, symbol=None):
             raise RuntimeError(
                 f"{source} {timeframe}: timestamp tartibi noto'g'ri"
             )
+
+        # Forex va metallar D1 shamlarida DST sabab 23/25 soatlik
+        # interval bo'lishi mumkin. Shuning uchun bozor sanalari tekshiriladi.
+        if (
+            timeframe == "D1"
+            and source in ("dukascopy", "lse", "twelve_data")
+            and symbol in DUKASCOPY_SYMBOLS
+        ):
+            market_tz = ZoneInfo("America/New_York")
+
+            previous_date = datetime.fromtimestamp(
+                previous.timestamp / 1000,
+                tz=timezone.utc,
+            ).astimezone(market_tz).date()
+
+            current_date = datetime.fromtimestamp(
+                current.timestamp / 1000,
+                tz=timezone.utc,
+            ).astimezone(market_tz).date()
+
+            if current_date <= previous_date:
+                gaps.append({
+                    "from": previous.timestamp,
+                    "to": current.timestamp,
+                    "missing_intervals": 0,
+                })
+                continue
+
+            missing_dates = [
+                previous_date + timedelta(days=offset)
+                for offset in range(
+                    1,
+                    (current_date - previous_date).days,
+                )
+            ]
+
+            missing_trading_dates = [
+                day for day in missing_dates
+                if not _is_expected_d1_closure(day)
+            ]
+
+            if missing_trading_dates:
+                gaps.append({
+                    "from": previous.timestamp,
+                    "to": current.timestamp,
+                    "missing_intervals": len(missing_trading_dates),
+                    "missing_dates": [
+                        day.isoformat()
+                        for day in missing_trading_dates
+                    ],
+                })
+
+            continue
 
         if difference <= duration_ms:
             continue
@@ -252,7 +315,11 @@ def _inspect_candle_gaps(candles, timeframe, source, symbol=None):
             and symbol is not None
             and bool(missing)
             and all(
-                _is_expected_market_closure(ts, symbol, timeframe)
+                _is_expected_market_closure(
+                    ts,
+                    symbol,
+                    timeframe,
+                )
                 for ts in missing_timestamps
             )
         )
