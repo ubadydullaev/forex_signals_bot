@@ -15,7 +15,7 @@ from .signal_engine import analyze_symbol
 
 VERSION = "V6"
 CANDLE_LIMIT = 250
-MINIMUM_CANDLES = 200
+MINIMUM_CANDLES = 220
 REQUEST_TIMEOUT = 25
 MAX_STORED_SIGNALS = 1000
 
@@ -428,7 +428,7 @@ def fetch_symbol_data(symbol):
         if len(candles) < MINIMUM_CANDLES:
             raise RuntimeError(
                 f"{symbol} {timeframe}: shamlar yetarli emas "
-                f"({len(candles)})"
+                f"({len(candles)}), talab: {MINIMUM_CANDLES}"
             )
 
         if not all(candle.is_closed for candle in candles):
