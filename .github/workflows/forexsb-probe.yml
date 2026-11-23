@@ -10,10 +10,10 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
-      - name: Check ForexSB data source
+      - name: Check all native ForexSB timeframes
         run: |
           python - <<'PY'
           import gzip
@@ -25,157 +25,96 @@ jobs:
           BASE = "https://data.forexsb.com/datafeed"
           EPOCH = datetime(2000, 1, 1, tzinfo=timezone.utc)
           SYMBOLS = ["XAUUSD", "XAGUSD", "EURUSD", "GBPUSD"]
+          PERIODS = {
+              "M15": ("m15", 15),
+              "M30": ("m30", 30),
+              "H1": ("h1", 60),
+              "H4": ("h4", 240),
+              "D1": ("d1", 1440),
+          }
 
           def download(url):
-              request = urllib.request.Request(
+              req = urllib.request.Request(
                   url,
                   headers={"User-Agent": "Mozilla/5.0"}
               )
-              with urllib.request.urlopen(request, timeout=90) as response:
-                  if response.status != 200:
-                      raise RuntimeError(f"HTTP {response.status}")
+              with urllib.request.urlopen(req, timeout=90) as response:
                   return response.read()
 
-          print("1. Metadata yuklanmoqda...")
-          metadata_raw = gzip.decompress(
+          print("Metadata yuklanmoqda...")
+          metadata = json.loads(gzip.decompress(
               download(BASE + "/info/premium.json.gz")
-          )
-          metadata = json.loads(metadata_raw)
+          ))
 
           now = datetime.now(timezone.utc)
-          results = {}
-
-          def parse_file(symbol, period):
-              url = (
-                  f"{BASE}/data/dukascopy/"
-                  f"{symbol}{period}.lb.gz"
-              )
-              raw = gzip.decompress(download(url))
-
-              if len(raw) == 0 or len(raw) % 28 != 0:
-                  raise RuntimeError(
-                      f"{symbol} {period}: binary hajmi noto'g'ri"
-                  )
-
-              info = metadata.get(symbol)
-              if not isinstance(info, dict):
-                  raise RuntimeError(
-                      f"{symbol}: metadata topilmadi"
-                  )
-
-              scale = float(info["priceScale"])
-              candles = []
-
-              for offset in range(0, len(raw), 28):
-                  minutes, op, hi, lo, cl, vol, spread = (
-                      struct.unpack_from("<7i", raw, offset)
-                  )
-
-                  timestamp = EPOCH + timedelta(minutes=minutes)
-
-                  candle = {
-                      "time": timestamp,
-                      "open": op / scale,
-                      "high": hi / scale,
-                      "low": lo / scale,
-                      "close": cl / scale,
-                      "volume": max(0, vol),
-                  }
-
-                  if (
-                      candle["low"] > 0
-                      and candle["high"] >= candle["low"]
-                      and candle["low"] <= candle["open"] <= candle["high"]
-                      and candle["low"] <= candle["close"] <= candle["high"]
-                      and timestamp <= now
-                  ):
-                      candles.append(candle)
-
-              candles.sort(key=lambda x: x["time"])
-              return candles
-
-          def aggregate(candles, minutes):
-              duration = timedelta(minutes=minutes)
-              groups = {}
-
-              for candle in candles:
-                  timestamp = candle["time"]
-                  seconds = int(timestamp.timestamp())
-                  bucket = seconds // int(duration.total_seconds())
-
-                  groups.setdefault(bucket, []).append(candle)
-
-              result = []
-
-              for bucket in sorted(groups):
-                  rows = groups[bucket]
-                  start = datetime.fromtimestamp(
-                      bucket * int(duration.total_seconds()),
-                      tz=timezone.utc
-                  )
-
-                  if start + duration > now:
-                      continue
-
-                  result.append({
-                      "time": start,
-                      "open": rows[0]["open"],
-                      "high": max(x["high"] for x in rows),
-                      "low": min(x["low"] for x in rows),
-                      "close": rows[-1]["close"],
-                      "volume": sum(x["volume"] for x in rows),
-                  })
-
-              return result
-
-          def check_count(symbol, timeframe, candles, minutes):
-              closed = [
-                  c for c in candles
-                  if c["time"] + timedelta(minutes=minutes) <= now
-              ]
-
-              if len(closed) < 220:
-                  raise RuntimeError(
-                      f"{symbol} {timeframe}: "
-                      f"faqat {len(closed)}/220 sham"
-                  )
-
-              latest = closed[-1]["time"]
-              age = now - latest
-
-              if age > timedelta(days=3):
-                  raise RuntimeError(
-                      f"{symbol} {timeframe}: "
-                      f"ma'lumot eskirgan ({age})"
-                  )
-
-              print(
-                  f"OK {symbol} {timeframe}: "
-                  f"{len(closed)} sham | oxirgisi: {latest}"
-              )
+          total = 0
 
           for symbol in SYMBOLS:
-              print(f"\n--- {symbol} ---")
+              info = metadata.get(symbol)
+              if not isinstance(info, dict):
+                  raise RuntimeError(f"{symbol}: metadata topilmadi")
 
-              m15 = parse_file(symbol, 15)
-              m30 = parse_file(symbol, 30)
+              scale = float(info["priceScale"])
+              print(f"\n--- {symbol} | priceScale={scale} ---")
 
-              check_count(symbol, "M15", m15, 15)
-              check_count(symbol, "M30", m30, 30)
-
-              for timeframe, minutes in [
-                  ("H1", 60),
-                  ("H4", 240),
-                  ("D1", 1440),
-              ]:
-                  candles = aggregate(m30, minutes)
-                  check_count(
-                      symbol,
-                      timeframe,
-                      candles,
-                      minutes
+              for timeframe, (period, minutes) in PERIODS.items():
+                  url = (
+                      f"{BASE}/data/dukascopy/"
+                      f"{symbol}{period}.lb.gz"
                   )
 
-          print("\nSUCCESS: ForexSB barcha tekshiruvlardan o'tdi.")
+                  try:
+                      raw = gzip.decompress(download(url))
+                  except Exception as error:
+                      raise RuntimeError(
+                          f"{symbol} {timeframe}: yuklash xatosi: {error}"
+                      )
+
+                  if not raw or len(raw) % 28 != 0:
+                      raise RuntimeError(
+                          f"{symbol} {timeframe}: binary format noto'g'ri"
+                      )
+
+                  rows = []
+                  for offset in range(0, len(raw), 28):
+                      values = struct.unpack_from("<7i", raw, offset)
+                      minute, op, hi, lo, cl, volume, spread = values
+                      stamp = EPOCH + timedelta(minutes=minute)
+
+                      if stamp + timedelta(minutes=minutes) > now:
+                          continue
+
+                      o, h, l, c = (
+                          op / scale, hi / scale,
+                          lo / scale, cl / scale
+                      )
+
+                      if (
+                          l > 0 and h >= l
+                          and l <= o <= h
+                          and l <= c <= h
+                      ):
+                          rows.append(stamp)
+
+                  rows.sort()
+                  if len(rows) < 220:
+                      raise RuntimeError(
+                          f"{symbol} {timeframe}: "
+                          f"{len(rows)}/220 sham"
+                      )
+
+                  age = now - rows[-1]
+                  if age > timedelta(days=3):
+                      raise RuntimeError(
+                          f"{symbol} {timeframe}: "
+                          f"ma'lumot eskirgan: {age}"
+                      )
+
+                  print(
+                      f"OK {symbol} {timeframe}: "
+                      f"{len(rows)} sham | oxirgisi {rows[-1]}"
+                  )
+                  total += 1
+
+          print(f"\nSUCCESS: {total}/20 native timeframe tekshiruvi o'tdi.")
           PY
-          
