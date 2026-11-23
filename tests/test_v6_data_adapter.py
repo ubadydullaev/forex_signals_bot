@@ -66,17 +66,13 @@ class TestV6DataAdapter(unittest.TestCase):
         self.assertEqual(gaps, [])
         self.assertEqual(len(caught), 0)
 
-    def test_us500_daily_break_is_ignored(self):
-        first = self.timestamp(2026, 11, 16, 21, 0)
-        second = self.timestamp(2026, 11, 16, 23, 0)
-
-        gaps, caught = self.inspect(
-            [self.candle(first), self.candle(second)],
-            "US500",
-        )
-
-        self.assertEqual(gaps, [])
-        self.assertEqual(len(caught), 0)
+    def test_removed_us500_is_rejected(self):
+        with self.assertRaises(ValueError):
+            data_adapter._validate_request(
+                symbol="US500",
+                timeframe="M15",
+                limit=250,
+            )
 
     def test_real_gold_weekday_gap_still_warns(self):
         first = self.timestamp(2026, 11, 17, 10, 0)
@@ -91,26 +87,14 @@ class TestV6DataAdapter(unittest.TestCase):
         self.assertEqual(len(caught), 1)
         self.assertEqual(gaps[0]["missing_intervals"], 2)
 
-    def test_real_us500_weekday_gap_still_warns(self):
-        first = self.timestamp(2026, 11, 17, 10, 0)
-        second = self.timestamp(2026, 11, 17, 10, 45)
-
-        gaps, caught = self.inspect(
-            [self.candle(first), self.candle(second)],
-            "US500",
-        )
-
-        self.assertEqual(len(gaps), 1)
-        self.assertEqual(len(caught), 1)
-
     def test_dukascopy_weekend_gap_is_ignored(self):
         friday = self.timestamp(2026, 11, 20, 22, 0)
         sunday = self.timestamp(2026, 11, 22, 23, 0)
 
         gaps, caught = self.inspect(
-        [self.candle(friday), self.candle(sunday)],
-         "XAUUSD",
-      )
+            [self.candle(friday), self.candle(sunday)],
+            "XAUUSD",
+        )
 
         self.assertEqual(gaps, [])
         self.assertEqual(len(caught), 0)
