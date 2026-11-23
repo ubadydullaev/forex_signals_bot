@@ -9,7 +9,6 @@ SYMBOLS = [
     "XAGUSD",  # Kumush
     "EURUSD",  # Yevro / AQSH dollari
     "GBPUSD",  # Funt / AQSH dollari
-    "US500",   # S&P 500 indeksi
     "BTCUSD",  # Bitcoin
     "ETHUSD",  # Ethereum
 ]
