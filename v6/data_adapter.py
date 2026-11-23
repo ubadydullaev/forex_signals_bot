@@ -7,7 +7,6 @@ import subprocess
 import tempfile
 import time
 import warnings
-
 from datetime import datetime, timedelta, timezone, time as dt_time
 from zoneinfo import ZoneInfo
 
@@ -15,12 +14,13 @@ import requests
 
 from .models import Candle, MarketData
 from .config import SYMBOLS, TIMEFRAMES
+from .lse_adapter import get_lse_candles
 
 
 # =========================================================
 # V6 MARKET DATA ADAPTER
-# Dukascopy -> Twelve Data fallback
-# Binance -> Crypto
+# Forex/metals: Dukascopy -> LSE -> Twelve Data
+# Crypto: Binance
 # =========================================================
 
 BINANCE_URL = "https://data-api.binance.vision/api/v3/klines"
@@ -32,6 +32,7 @@ BINANCE_MAX_PAGE = 1000
 
 REQUEST_TIMEOUT = 30
 DUKASCOPY_TIMEOUT = 240
+MAX_STALE_INTERVALS = 2
 
 CACHE_FILE = os.path.join(
     os.path.dirname(__file__),
@@ -50,7 +51,6 @@ DUKASCOPY_SYMBOLS = {
     "XAGUSD": "xagusd",
     "EURUSD": "eurusd",
     "GBPUSD": "gbpusd",
-    "US500": "usa500idxusd",
 }
 
 BINANCE_SYMBOLS = {
@@ -96,14 +96,8 @@ session.headers.update({
     "User-Agent": "ForexSignalsBot-V6/6.0"
 })
 
-# Twelve Data free plan: 8 credits/minute.
-# Requests are spaced to avoid exceeding that limit.
 _last_twelve_request = 0.0
 TWELVE_REQUEST_INTERVAL = 8.5
-
-# Cache is reused until the current timeframe candle interval expires.
-# On provider errors, a recent cache may be used as a temporary fallback.
-MAX_STALE_INTERVALS = 2
 
 
 # =========================================================
@@ -112,50 +106,31 @@ MAX_STALE_INTERVALS = 2
 
 def _validate_request(symbol, timeframe, limit):
     if symbol not in SYMBOLS:
-        raise ValueError(
-            f"V6 uchun noma'lum instrument: {symbol}"
-        )
+        raise ValueError(f"V6 uchun noma'lum instrument: {symbol}")
 
     if timeframe not in TIMEFRAMES:
-        raise ValueError(
-            f"V6 uchun noma'lum timeframe: {timeframe}"
-        )
+        raise ValueError(f"V6 uchun noma'lum timeframe: {timeframe}")
 
     if isinstance(limit, bool) or not isinstance(limit, int):
-        raise ValueError(
-            "limit musbat butun son bo'lishi kerak"
-        )
+        raise ValueError("limit musbat butun son bo'lishi kerak")
 
     if not MIN_CANDLES <= limit <= MAX_CANDLES:
         raise ValueError(
-            f"Shamlar soni {MIN_CANDLES}-{MAX_CANDLES} "
-            "oralig'ida bo'lishi kerak"
+            f"Shamlar soni {MIN_CANDLES}-{MAX_CANDLES} oralig'ida bo'lishi kerak"
         )
 
 
 def _valid_prices(open_price, high, low, close):
     values = (open_price, high, low, close)
 
-    if not all(
-        math.isfinite(value) and value > 0
-        for value in values
-    ):
+    if not all(math.isfinite(v) and v > 0 for v in values):
         return False
 
-    if high < low:
-        return False
-
-    if not low <= open_price <= high:
-        return False
-
-    if not low <= close <= high:
-        return False
-
-    return True
-
-
-def _valid_volume(volume):
-    return math.isfinite(volume) and volume >= 0
+    return (
+        high >= low
+        and low <= open_price <= high
+        and low <= close <= high
+    )
 
 
 def _valid_timestamp(timestamp):
@@ -167,14 +142,9 @@ def _valid_timestamp(timestamp):
 
 
 def _calculate_lookback_days(timeframe, limit):
-    duration_ms = TIMEFRAME_SETTINGS[timeframe]["duration_ms"]
-    seconds_per_candle = duration_ms / 1000
-
-    estimated_days = (
-        limit * seconds_per_candle / 86400 * (7 / 5) * 1.35
-    )
-
-    return max(7, math.ceil(estimated_days) + 2)
+    seconds = TIMEFRAME_SETTINGS[timeframe]["duration_ms"] / 1000
+    days = limit * seconds / 86400 * (7 / 5) * 1.35
+    return max(7, math.ceil(days) + 2)
 
 
 # =========================================================
@@ -194,10 +164,8 @@ def _easter_sunday(year):
     k = c % 4
     l = (32 + 2 * e + 2 * i - h - k) % 7
     m = (a + 11 * h + 22 * l) // 451
-
     month = (h + l - 7 * m + 114) // 31
     day = ((h + l - 7 * m + 114) % 31) + 1
-
     return datetime(year, month, day).date()
 
 
@@ -205,41 +173,30 @@ def _is_expected_market_closure(timestamp, symbol, timeframe=None):
     if symbol not in DUKASCOPY_SYMBOLS:
         return False
 
-    if timeframe == "D1":
-        utc_date = datetime.fromtimestamp(
-            timestamp / 1000,
-            tz=timezone.utc,
-        ).date()
+    local_dt = datetime.fromtimestamp(
+        timestamp / 1000,
+        tz=timezone.utc,
+    )
 
-        if utc_date.weekday() >= 5:
+    if timeframe == "D1":
+        market_date = local_dt.date()
+
+        if market_date.weekday() >= 5:
             return True
 
-        good_friday = _easter_sunday(utc_date.year) - timedelta(days=2)
-        return utc_date == good_friday
+        good_friday = _easter_sunday(market_date.year) - timedelta(days=2)
+        return market_date == good_friday
 
     if symbol in ("XAUUSD", "XAGUSD"):
         market_tz = ZoneInfo("America/New_York")
         close_time = dt_time(17, 0)
         open_time = dt_time(18, 0)
-
-    elif symbol == "US500":
-        market_tz = ZoneInfo("America/Chicago")
-        close_time = dt_time(15, 15)
-        open_time = dt_time(17, 0)
-
-    elif symbol in ("EURUSD", "GBPUSD"):
+    else:
         market_tz = ZoneInfo("America/New_York")
         close_time = dt_time(17, 0)
         open_time = dt_time(17, 0)
 
-    else:
-        return False
-
-    local_dt = datetime.fromtimestamp(
-        timestamp / 1000,
-        tz=timezone.utc,
-    ).astimezone(market_tz)
-
+    local_dt = local_dt.astimezone(market_tz)
     weekday = local_dt.weekday()
     local_time = local_dt.time().replace(tzinfo=None)
 
@@ -252,15 +209,14 @@ def _is_expected_market_closure(timestamp, symbol, timeframe=None):
     if weekday == 4 and local_time >= close_time:
         return True
 
-    if close_time < open_time:
-        if close_time <= local_time < open_time:
-            return True
+    if close_time < open_time and close_time <= local_time < open_time:
+        return True
 
     return False
 
 
 # =========================================================
-# CANDLE GAP CHECK
+# CANDLE NORMALIZATION AND GAP CHECK
 # =========================================================
 
 def _inspect_candle_gaps(candles, timeframe, source, symbol=None):
@@ -291,23 +247,19 @@ def _inspect_candle_gaps(candles, timeframe, source, symbol=None):
             })
             continue
 
-        missing_timestamps = list(range(
+        missing_timestamps = range(
             previous.timestamp + duration_ms,
             current.timestamp,
             duration_ms,
-        ))
+        )
 
         expected_closure = (
-            source in ("dukascopy", "twelve_data")
+            source in ("dukascopy", "lse", "twelve_data")
             and symbol is not None
-            and bool(missing_timestamps)
+            and bool(missing)
             and all(
-                _is_expected_market_closure(
-                    timestamp,
-                    symbol,
-                    timeframe,
-                )
-                for timestamp in missing_timestamps
+                _is_expected_market_closure(ts, symbol, timeframe)
+                for ts in missing_timestamps
             )
         )
 
@@ -320,21 +272,16 @@ def _inspect_candle_gaps(candles, timeframe, source, symbol=None):
 
     if gaps:
         warnings.warn(
-            f"{source} {timeframe}: {len(gaps)} ta ehtimoliy "
-            f"sham uzilishi. Birinchi uzilishlar: {gaps[:5]}",
+            f"{source} {timeframe}: {len(gaps)} ta ehtimoliy sham uzilishi. "
+            f"Birinchi uzilishlar: {gaps[:5]}",
             RuntimeWarning,
         )
 
     return gaps
 
 
-# =========================================================
-# NORMALIZE CANDLES
-# =========================================================
-
 def _build_candles(raw_candles, timeframe, source, limit, symbol=None):
     duration_ms = TIMEFRAME_SETTINGS[timeframe]["duration_ms"]
-
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     candles_by_time = {}
 
@@ -345,7 +292,6 @@ def _build_candles(raw_candles, timeframe, source, limit, symbol=None):
             if not _valid_timestamp(timestamp):
                 continue
 
-            # Faqat yopilgan shamlar.
             if timestamp + duration_ms > now_ms:
                 continue
 
@@ -358,7 +304,7 @@ def _build_candles(raw_candles, timeframe, source, limit, symbol=None):
             if not _valid_prices(open_price, high, low, close):
                 continue
 
-            if not _valid_volume(volume):
+            if not math.isfinite(volume) or volume < 0:
                 continue
 
             candle = Candle(
@@ -372,24 +318,18 @@ def _build_candles(raw_candles, timeframe, source, limit, symbol=None):
                 source=source,
             )
 
-            if timestamp in candles_by_time:
-                if candles_by_time[timestamp] != candle:
-                    raise RuntimeError(
-                        f"{source} {timeframe}: "
-                        f"qarama-qarshi duplicate: {timestamp}"
-                    )
-                continue
+            existing = candles_by_time.get(timestamp)
+
+            if existing is not None and existing != candle:
+                raise RuntimeError(
+                    f"{source} {timeframe}: qarama-qarshi duplicate: {timestamp}"
+                )
 
             candles_by_time[timestamp] = candle
 
         except RuntimeError:
             raise
-        except (
-            KeyError,
-            TypeError,
-            ValueError,
-            OverflowError,
-        ):
+        except (KeyError, TypeError, ValueError, OverflowError):
             continue
 
     candles = sorted(
@@ -403,12 +343,7 @@ def _build_candles(raw_candles, timeframe, source, limit, symbol=None):
             f"{len(candles)}/{MIN_CANDLES}"
         )
 
-    _inspect_candle_gaps(
-        candles,
-        timeframe,
-        source,
-        symbol,
-    )
+    _inspect_candle_gaps(candles, timeframe, source, symbol)
 
     result = candles[-limit:]
 
@@ -426,7 +361,7 @@ def _build_candles(raw_candles, timeframe, source, limit, symbol=None):
 
 
 # =========================================================
-# CACHE
+# TWELVE DATA CACHE
 # =========================================================
 
 def _load_cache():
@@ -436,17 +371,13 @@ def _load_cache():
     try:
         with open(CACHE_FILE, "r", encoding="utf-8") as file:
             data = json.load(file)
-
         return data if isinstance(data, dict) else {}
-
     except (OSError, json.JSONDecodeError):
         return {}
 
 
 def _save_cache(cache):
-    directory = os.path.dirname(CACHE_FILE)
-    os.makedirs(directory, exist_ok=True)
-
+    os.makedirs(os.path.dirname(CACHE_FILE), exist_ok=True)
     temporary_file = CACHE_FILE + ".tmp"
 
     with open(temporary_file, "w", encoding="utf-8") as file:
@@ -462,59 +393,40 @@ def _cache_key(symbol, timeframe):
 def _candles_to_cache(candles):
     return [
         {
-            "timestamp": candle.timestamp,
-            "open": candle.open,
-            "high": candle.high,
-            "low": candle.low,
-            "close": candle.close,
-            "volume": candle.volume,
+            "timestamp": c.timestamp,
+            "open": c.open,
+            "high": c.high,
+            "low": c.low,
+            "close": c.close,
+            "volume": c.volume,
         }
-        for candle in candles
+        for c in candles
     ]
 
 
-def _candles_from_cache(entry, symbol, timeframe, limit):
-    raw = entry.get("candles", [])
-
-    return _build_candles(
-        raw_candles=raw,
-        timeframe=timeframe,
-        source="twelve_data",
-        limit=limit,
-        symbol=symbol,
-    )
-
-
 def _get_cached_twelve_data(symbol, timeframe, limit, allow_stale=False):
-    cache = _load_cache()
-    entry = cache.get(_cache_key(symbol, timeframe))
+    entry = _load_cache().get(_cache_key(symbol, timeframe))
 
     if not isinstance(entry, dict):
         return None
 
     try:
-        fetched_at = float(entry["fetched_at"])
-        age = time.time() - fetched_at
-        duration_seconds = (
-            TIMEFRAME_SETTINGS[timeframe]["duration_ms"] / 1000
+        age = time.time() - float(entry["fetched_at"])
+        duration_seconds = TIMEFRAME_SETTINGS[timeframe]["duration_ms"] / 1000
+        max_age = duration_seconds * (
+            MAX_STALE_INTERVALS if allow_stale else 1
         )
-
-        max_age = duration_seconds
-
-        if allow_stale:
-            max_age *= MAX_STALE_INTERVALS
 
         if age < 0 or age > max_age:
             return None
 
-        candles = _candles_from_cache(
-            entry,
-            symbol,
+        return _build_candles(
+            entry.get("candles", []),
             timeframe,
+            "twelve_data",
             limit,
+            symbol,
         )
-
-        return candles
 
     except (KeyError, TypeError, ValueError, RuntimeError):
         return None
@@ -522,12 +434,10 @@ def _get_cached_twelve_data(symbol, timeframe, limit, allow_stale=False):
 
 def _store_twelve_data_cache(symbol, timeframe, candles):
     cache = _load_cache()
-
     cache[_cache_key(symbol, timeframe)] = {
         "fetched_at": time.time(),
         "candles": _candles_to_cache(candles),
     }
-
     _save_cache(cache)
 
 
@@ -561,24 +471,17 @@ def _fetch_binance(symbol, timeframe, limit):
     binance_symbol = BINANCE_SYMBOLS.get(symbol)
 
     if not binance_symbol:
-        raise ValueError(
-            f"Binance instrument kodi topilmadi: {symbol}"
-        )
+        raise ValueError(f"Binance instrument kodi topilmadi: {symbol}")
 
     settings = TIMEFRAME_SETTINGS[timeframe]
     duration_ms = settings["duration_ms"]
-
-    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-    end_time = now_ms - duration_ms
+    end_time = int(datetime.now(timezone.utc).timestamp() * 1000) - duration_ms
 
     raw_candles = []
     previous_oldest = None
 
     while len({x["timestamp"] for x in raw_candles}) < limit:
-        remaining = limit - len({
-            x["timestamp"] for x in raw_candles
-        })
-
+        remaining = limit - len({x["timestamp"] for x in raw_candles})
         page_limit = min(BINANCE_MAX_PAGE, remaining)
 
         try:
@@ -596,14 +499,10 @@ def _fetch_binance(symbol, timeframe, limit):
             raw_data = response.json()
 
         except requests.RequestException as error:
-            raise RuntimeError(
-                f"Binance ulanish xatosi: {error}"
-            ) from error
+            raise RuntimeError(f"Binance ulanish xatosi: {error}") from error
 
         except ValueError as error:
-            raise RuntimeError(
-                "Binance JSON javobini o'qib bo'lmadi"
-            ) from error
+            raise RuntimeError("Binance JSON javobini o'qib bo'lmadi") from error
 
         if not isinstance(raw_data, list) or not raw_data:
             break
@@ -614,18 +513,10 @@ def _fetch_binance(symbol, timeframe, limit):
             break
 
         raw_candles.extend(parsed)
+        oldest_timestamp = min(x["timestamp"] for x in parsed)
 
-        oldest_timestamp = min(
-            item["timestamp"] for item in parsed
-        )
-
-        if (
-            previous_oldest is not None
-            and oldest_timestamp >= previous_oldest
-        ):
-            raise RuntimeError(
-                "Binance pagination oldinga siljimadi"
-            )
+        if previous_oldest is not None and oldest_timestamp >= previous_oldest:
+            raise RuntimeError("Binance pagination oldinga siljimadi")
 
         previous_oldest = oldest_timestamp
 
@@ -654,19 +545,13 @@ def _fetch_dukascopy(symbol, timeframe, limit):
     instrument = DUKASCOPY_SYMBOLS.get(symbol)
 
     if not instrument:
-        raise ValueError(
-            f"Dukascopy instrument kodi topilmadi: {symbol}"
-        )
+        raise ValueError(f"Dukascopy instrument kodi topilmadi: {symbol}")
 
     settings = TIMEFRAME_SETTINGS[timeframe]
     now = datetime.now(timezone.utc)
-
     lookback_days = _calculate_lookback_days(timeframe, limit)
 
-    from_date = (
-        now - timedelta(days=lookback_days)
-    ).strftime("%Y-%m-%d")
-
+    from_date = (now - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
     to_date = now.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     safe_name = re.sub(
@@ -700,12 +585,10 @@ def _fetch_dukascopy(symbol, timeframe, limit):
                 timeout=DUKASCOPY_TIMEOUT,
                 check=False,
             )
-
         except subprocess.TimeoutExpired as error:
             raise RuntimeError(
                 f"Dukascopy {symbol} {timeframe}: so'rov vaqti tugadi"
             ) from error
-
         except OSError as error:
             raise RuntimeError(
                 "Dukascopy dasturini ishga tushirib bo'lmadi"
@@ -716,35 +599,26 @@ def _fetch_dukascopy(symbol, timeframe, limit):
                 part for part in (result.stdout, result.stderr)
                 if part and part.strip()
             )
-
             raise RuntimeError(
                 "Dukascopy ma'lumot olishda xato: "
                 + (diagnostic[-2000:] or "Noma'lum xato")
             )
 
-        output_file = os.path.join(
-            output_dir,
-            safe_name + ".json",
-        )
+        output_file = os.path.join(output_dir, safe_name + ".json")
 
         if not os.path.isfile(output_file):
-            raise RuntimeError(
-                "Dukascopy JSON fayli yaratilmadi"
-            )
+            raise RuntimeError("Dukascopy JSON fayli yaratilmadi")
 
         try:
             with open(output_file, "r", encoding="utf-8") as file:
                 raw_data = json.load(file)
-
         except (OSError, json.JSONDecodeError) as error:
             raise RuntimeError(
                 "Dukascopy JSON faylini o'qib bo'lmadi"
             ) from error
 
     if not isinstance(raw_data, list):
-        raise RuntimeError(
-            "Dukascopy noto'g'ri JSON format qaytardi"
-        )
+        raise RuntimeError("Dukascopy noto'g'ri JSON format qaytardi")
 
     raw_candles = []
 
@@ -761,12 +635,7 @@ def _fetch_dukascopy(symbol, timeframe, limit):
                 "close": float(item["close"]),
                 "volume": float(item.get("volume", 0) or 0),
             })
-        except (
-            KeyError,
-            TypeError,
-            ValueError,
-            OverflowError,
-        ):
+        except (KeyError, TypeError, ValueError, OverflowError):
             continue
 
     return _build_candles(
@@ -795,17 +664,8 @@ def _wait_twelve_data_rate_limit():
 
 
 def _parse_twelve_datetime(value):
-    """
-    Twelve Data datetime qiymatini UTC Unix milliseconds ga o'tkazadi.
-    """
-
-    parsed = datetime.strptime(
-        value,
-        "%Y-%m-%d %H:%M:%S",
-    )
-
+    parsed = datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
     parsed = parsed.replace(tzinfo=timezone.utc)
-
     return int(parsed.timestamp() * 1000)
 
 
@@ -813,19 +673,14 @@ def _fetch_twelve_data(symbol, timeframe, limit):
     api_key = os.getenv("TWELVE_DATA_API_KEY")
 
     if not api_key:
-        raise RuntimeError(
-            "TWELVE_DATA_API_KEY GitHub Secret topilmadi"
-        )
+        raise RuntimeError("TWELVE_DATA_API_KEY GitHub Secret topilmadi")
 
     twelve_symbol = TWELVE_DATA_SYMBOLS.get(symbol)
 
     if not twelve_symbol:
-        raise ValueError(
-            f"Twelve Data instrumenti mavjud emas: {symbol}"
-        )
+        raise ValueError(f"Twelve Data instrumenti mavjud emas: {symbol}")
 
     _wait_twelve_data_rate_limit()
-
     settings = TIMEFRAME_SETTINGS[timeframe]
 
     try:
@@ -841,14 +696,11 @@ def _fetch_twelve_data(symbol, timeframe, limit):
             },
             timeout=REQUEST_TIMEOUT,
         )
-
         response.raise_for_status()
         payload = response.json()
 
     except requests.RequestException as error:
-        raise RuntimeError(
-            f"Twelve Data ulanish xatosi: {error}"
-        ) from error
+        raise RuntimeError(f"Twelve Data ulanish xatosi: {error}") from error
 
     except ValueError as error:
         raise RuntimeError(
@@ -856,25 +708,19 @@ def _fetch_twelve_data(symbol, timeframe, limit):
         ) from error
 
     if not isinstance(payload, dict):
-        raise RuntimeError(
-            "Twelve Data noto'g'ri javob qaytardi"
-        )
+        raise RuntimeError("Twelve Data noto'g'ri javob qaytardi")
 
     if payload.get("status") == "error" or "code" in payload:
         message = payload.get(
             "message",
             payload.get("status", "Noma'lum API xatosi"),
         )
-        raise RuntimeError(
-            f"Twelve Data API xatosi: {message}"
-        )
+        raise RuntimeError(f"Twelve Data API xatosi: {message}")
 
     values = payload.get("values")
 
     if not isinstance(values, list):
-        raise RuntimeError(
-            "Twelve Data javobida values ro'yxati yo'q"
-        )
+        raise RuntimeError("Twelve Data javobida values ro'yxati yo'q")
 
     raw_candles = []
 
@@ -884,22 +730,14 @@ def _fetch_twelve_data(symbol, timeframe, limit):
 
         try:
             raw_candles.append({
-                "timestamp": _parse_twelve_datetime(
-                    item["datetime"]
-                ),
+                "timestamp": _parse_twelve_datetime(item["datetime"]),
                 "open": float(item["open"]),
                 "high": float(item["high"]),
                 "low": float(item["low"]),
                 "close": float(item["close"]),
                 "volume": float(item.get("volume", 0) or 0),
             })
-
-        except (
-            KeyError,
-            TypeError,
-            ValueError,
-            OverflowError,
-        ):
+        except (KeyError, TypeError, ValueError, OverflowError):
             continue
 
     candles = _build_candles(
@@ -910,17 +748,11 @@ def _fetch_twelve_data(symbol, timeframe, limit):
         symbol,
     )
 
-    _store_twelve_data_cache(
-        symbol,
-        timeframe,
-        candles,
-    )
-
+    _store_twelve_data_cache(symbol, timeframe, candles)
     return candles
 
 
 def _fetch_twelve_data_with_cache(symbol, timeframe, limit):
-    # Avval yangi keshni tekshiramiz.
     cached = _get_cached_twelve_data(
         symbol,
         timeframe,
@@ -932,15 +764,9 @@ def _fetch_twelve_data_with_cache(symbol, timeframe, limit):
         return cached
 
     try:
-        return _fetch_twelve_data(
-            symbol,
-            timeframe,
-            limit,
-        )
+        return _fetch_twelve_data(symbol, timeframe, limit)
 
     except Exception as api_error:
-        # API vaqtincha ishlamasa, cheklangan muddatdagi
-        # eski keshni ishlatishga ruxsat beriladi.
         stale = _get_cached_twelve_data(
             symbol,
             timeframe,
@@ -960,82 +786,119 @@ def _fetch_twelve_data_with_cache(symbol, timeframe, limit):
 
 
 # =========================================================
+# LSE FALLBACK
+# =========================================================
+
+def _fetch_lse(symbol, timeframe, limit):
+    candles = get_lse_candles(
+        symbol=symbol,
+        timeframe=timeframe,
+        limit=min(limit, 250),
+    )
+
+    if not isinstance(candles, list):
+        raise RuntimeError("LSE noto'g'ri candle ro'yxatini qaytardi")
+
+    normalized = []
+
+    for candle in candles:
+        if isinstance(candle, Candle):
+            normalized.append({
+                "timestamp": candle.timestamp,
+                "open": candle.open,
+                "high": candle.high,
+                "low": candle.low,
+                "close": candle.close,
+                "volume": candle.volume,
+            })
+        elif isinstance(candle, dict):
+            normalized.append(candle)
+        else:
+            raise RuntimeError("LSE candle formati noto'g'ri")
+
+    return _build_candles(
+        normalized,
+        timeframe,
+        "lse",
+        min(limit, 250),
+        symbol,
+    )
+
+
+# =========================================================
 # PUBLIC DATA API
 # =========================================================
 
 def get_candles(symbol, timeframe, limit=1000):
     """
-    Yopilgan shamlarni qaytaradi.
-
     Forex/metals:
         1. Dukascopy
-        2. Twelve Data fallback
+        2. LSE
+        3. Twelve Data
 
     Crypto:
         Binance
-
-    US500:
-        Faqat Dukascopy
     """
 
     _validate_request(symbol, timeframe, limit)
 
     if symbol in BINANCE_SYMBOLS:
-        return _fetch_binance(
+        return _fetch_binance(symbol, timeframe, limit)
+
+    if symbol not in DUKASCOPY_SYMBOLS:
+        raise ValueError(
+            f"{symbol} uchun ma'lumot manbasi aniqlanmagan"
+        )
+
+    dukascopy_error = None
+
+    try:
+        return _fetch_dukascopy(symbol, timeframe, limit)
+
+    except Exception as error:
+        dukascopy_error = error
+        warnings.warn(
+            f"Dukascopy {symbol} {timeframe} ishlamadi. "
+            f"LSE fallback ishga tushadi: {error}",
+            RuntimeWarning,
+        )
+
+    lse_error = None
+
+    try:
+        return _fetch_lse(symbol, timeframe, limit)
+
+    except Exception as error:
+        lse_error = error
+        warnings.warn(
+            f"LSE {symbol} {timeframe} ishlamadi. "
+            f"Twelve Data fallback ishga tushadi: {error}",
+            RuntimeWarning,
+        )
+
+    if symbol not in TWELVE_DATA_SYMBOLS:
+        raise RuntimeError(
+            f"{symbol} uchun barcha manbalar ishlamadi. "
+            f"Dukascopy: {dukascopy_error}. LSE: {lse_error}"
+        )
+
+    try:
+        return _fetch_twelve_data_with_cache(
             symbol,
             timeframe,
             limit,
         )
 
-    if symbol in DUKASCOPY_SYMBOLS:
-        try:
-            candles = _fetch_dukascopy(
-                symbol,
-                timeframe,
-                limit,
-            )
-
-            return candles
-
-        except Exception as dukascopy_error:
-            if symbol not in TWELVE_DATA_SYMBOLS:
-                raise RuntimeError(
-                    f"{symbol} uchun Dukascopy ishlamadi va "
-                    f"fallback mavjud emas: {dukascopy_error}"
-                ) from dukascopy_error
-
-            warnings.warn(
-                f"Dukascopy {symbol} {timeframe} ishlamadi. "
-                f"Twelve Data fallback ishga tushadi: "
-                f"{dukascopy_error}",
-                RuntimeWarning,
-            )
-
-            try:
-                return _fetch_twelve_data_with_cache(
-                    symbol,
-                    timeframe,
-                    limit,
-                )
-
-            except Exception as twelve_error:
-                raise RuntimeError(
-                    f"{symbol} {timeframe}: ikkala manba ham "
-                    f"ma'lumot bera olmadi. "
-                    f"Dukascopy: {dukascopy_error}. "
-                    f"Twelve Data: {twelve_error}"
-                ) from twelve_error
-
-    raise ValueError(
-        f"{symbol} uchun ma'lumot manbasi aniqlanmagan"
-    )
+    except Exception as twelve_error:
+        raise RuntimeError(
+            f"{symbol} {timeframe}: barcha manbalar ishlamadi. "
+            f"Dukascopy: {dukascopy_error}. "
+            f"LSE: {lse_error}. "
+            f"Twelve Data: {twelve_error}"
+        ) from twelve_error
 
 
 def get_market_data(symbol, timeframe, limit=1000):
-    """
-    V6 tahlil modullari uchun MarketData qaytaradi.
-    """
-
     candles = get_candles(
         symbol=symbol,
         timeframe=timeframe,
