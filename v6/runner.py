@@ -1,4 +1,3 @@
-
 import base64
 import html
 import json
@@ -9,13 +8,14 @@ import sys
 import requests
 
 from .config import SYMBOLS, TIMEFRAMES
-from .data_adapter import get_market_data
+from .data_pipeline import get_verified_market_data
+from .mtf_analysis import analyze_single_timeframe
 from .signal_engine import analyze_symbol
 
 
 VERSION = "V6"
-CANDLE_LIMIT = 250
-MINIMUM_CANDLES = 220
+CANDLE_LIMIT = 1000
+MINIMUM_CANDLES = 1000
 REQUEST_TIMEOUT = 25
 MAX_STORED_SIGNALS = 1000
 
@@ -417,7 +417,7 @@ def fetch_symbol_data(symbol):
             timeframe,
         )
 
-        market = get_market_data(
+        market = get_verified_market_data(
             symbol=symbol,
             timeframe=timeframe,
             limit=CANDLE_LIMIT,
@@ -449,8 +449,40 @@ def fetch_symbol_data(symbol):
     return candles_by_timeframe
 
 
+def _fmt_metric(value, digits=2):
+    if value is None:
+        return "N/A"
+    return f"{float(value):.{digits}f}"
+
+
+def log_timeframe_analysis(candles_by_timeframe):
+    """Har bir timeframe indikatorlari va trendini diagnostika uchun yozadi."""
+    for timeframe in TIMEFRAMES:
+        result = analyze_single_timeframe(
+            candles_by_timeframe.get(timeframe, []),
+            timeframe,
+        )
+
+        logger.info(
+            "[TIMEFRAME ANALYSIS] %s | trend=%s | ADX=%s | RSI=%s | "
+            "EMA20=%s | EMA50=%s | EMA200=%s | Supertrend=%s | "
+            "structure=%s | reasons=%s",
+            timeframe,
+            result["trend"],
+            _fmt_metric(result["adx"]),
+            _fmt_metric(result["rsi"]),
+            _fmt_metric(result["ema_20"], 5),
+            _fmt_metric(result["ema_50"], 5),
+            _fmt_metric(result["ema_200"], 5),
+            result["supertrend_direction"],
+            result["structure_trend"],
+            "; ".join(result["reasons"]),
+        )
+
+
 def analyze_one_symbol(symbol):
     candles_by_timeframe = fetch_symbol_data(symbol)
+    log_timeframe_analysis(candles_by_timeframe)
 
     result = analyze_symbol(
         symbol=symbol,
@@ -479,6 +511,7 @@ def main():
     logger.info("V6 UNIFIED RUNNER ISHGA TUSHDI")
     logger.info("Instrumentlar: %s", SYMBOLS)
     logger.info("Timeframes: %s", TIMEFRAMES)
+    logger.info("Shamlar soni: %s", CANDLE_LIMIT)
     logger.info("Telegram: %s", TELEGRAM_ENABLED)
     logger.info("=" * 60)
 
