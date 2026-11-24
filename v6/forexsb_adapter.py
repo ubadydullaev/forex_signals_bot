@@ -22,42 +22,31 @@ TIMEFRAME_MINUTES = {
 session = requests.Session()
 session.headers.update({
     "User-Agent": "Mozilla/5.0",
-    "Accept": "application/gzip, application/octet-stream, */*",
+    "Accept": "application/gzip, application/json, application/octet-stream, */*",
 })
 
 _metadata_cache = None
 _data_cache = {}
 
 
-def _decode_response(response, filename):
+def _request_content(url, timeout=60):
+    response = session.get(url, timeout=timeout)
     response.raise_for_status()
 
     content = response.content
 
     if not content:
-        raise RuntimeError(
-            f"ForexSB bo'sh javob qaytardi: {filename}"
-        )
+        raise RuntimeError("ForexSB bo'sh javob qaytardi")
 
-    # requests gzip Content-Encoding javobini avtomatik ochishi mumkin.
-    # Shuning uchun avval gzip magic bytes tekshiriladi.
+    # requests ba'zan gzip Content-Encoding ni avtomatik ochadi.
+    # Shuning uchun faqat gzip magic bytes bo'lsa ochamiz.
     if content[:2] == b"\x1f\x8b":
         try:
             content = gzip.decompress(content)
         except (OSError, EOFError) as error:
             raise RuntimeError(
-                f"ForexSB gzip buzilgan: {filename}"
+                "ForexSB gzip faylini ochib bo'lmadi"
             ) from error
-
-    # HTML yoki JSON xato sahifalarini binary deb qabul qilmaymiz.
-    if content.lstrip().startswith((b"<", b"{", b"[")):
-        preview = content[:180].decode(
-            "utf-8", errors="replace"
-        )
-        raise RuntimeError(
-            f"ForexSB binary o'rniga matn qaytardi: "
-            f"{filename}: {preview}"
-        )
 
     return content
 
@@ -68,21 +57,21 @@ def _get_metadata():
     if _metadata_cache is not None:
         return _metadata_cache
 
-    response = session.get(
+    content = _request_content(
         METADATA_URL,
         timeout=30,
     )
 
-    content = _decode_response(
-        response,
-        "premium.json.gz",
-    )
-
     try:
-        metadata = json.loads(content.decode("utf-8"))
+        metadata = json.loads(
+            content.decode("utf-8-sig")
+        )
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        preview = content[:200].decode(
+            "utf-8", errors="replace"
+        )
         raise RuntimeError(
-            "ForexSB metadata JSON formati noto'g'ri"
+            f"ForexSB metadata JSON xatosi: {preview}"
         ) from error
 
     if not isinstance(metadata, dict):
@@ -150,17 +139,31 @@ def _download_native(symbol, minutes):
     filename = f"{symbol}{minutes}.lb.gz"
     url = f"{DATA_URL}/{filename}"
 
-    response = session.get(
-        url,
-        timeout=90,
-    )
-
-    if response.status_code == 404:
-        raise RuntimeError(
-            f"ForexSB fayli topilmadi: {filename}"
+    try:
+        raw = _request_content(
+            url,
+            timeout=90,
         )
+    except requests.HTTPError as error:
+        status = getattr(
+            error.response, "status_code", None
+        )
+        if status == 404:
+            raise RuntimeError(
+                f"ForexSB fayli topilmadi: {filename}"
+            ) from error
+        raise RuntimeError(
+            f"ForexSB HTTP xatosi {filename}: {error}"
+        ) from error
 
-    raw = _decode_response(response, filename)
+    if raw.lstrip().startswith((b"<", b"{", b"[")):
+        preview = raw[:180].decode(
+            "utf-8", errors="replace"
+        )
+        raise RuntimeError(
+            f"ForexSB binary o'rniga matn qaytardi: "
+            f"{filename}: {preview}"
+        )
 
     record_size = 28
 
@@ -314,6 +317,7 @@ def get_forexsb_raw_candles(symbol, timeframe):
         )
 
     metadata = _get_metadata()
+
     price_scale = _find_symbol_metadata(
         metadata,
         symbol,
