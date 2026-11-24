@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import time
 import warnings
+from .forexsb_adapter import get_forexsb_raw_candles
 from datetime import datetime, timedelta, timezone, time as dt_time
 from zoneinfo import ZoneInfo
 
