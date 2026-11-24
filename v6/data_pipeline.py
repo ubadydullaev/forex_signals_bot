@@ -1,0 +1,228 @@
+import logging
+import warnings
+from datetime import datetime, timezone
+
+from . import data_adapter
+from .models import MarketData
+
+
+logger = logging.getLogger("V6.DATA")
+
+MINIMUM_HISTORY = 1000
+MAX_FX_DATA_AGE_HOURS = 72
+OLD_D1_GAP_AGE_DAYS = 30
+
+
+def _get_providers(symbol):
+    if symbol in data_adapter.BINANCE_SYMBOLS:
+        return [
+            ("Binance Spot", data_adapter._fetch_binance),
+        ]
+
+    providers = [
+        ("LSE", data_adapter._fetch_lse),
+        ("ForexSB", data_adapter._fetch_forexsb),
+        ("Dukascopy", data_adapter._fetch_dukascopy),
+    ]
+
+    if symbol in data_adapter.TWELVE_DATA_SYMBOLS:
+        providers.append(
+            ("Twelve Data", data_adapter._fetch_twelve_data_with_cache)
+        )
+
+    return providers
+
+
+def _format_time(timestamp):
+    return datetime.fromtimestamp(
+        timestamp / 1000,
+        tz=timezone.utc,
+    ).isoformat()
+
+
+def _validate_history(symbol, timeframe, candles, requested_limit):
+    if not isinstance(candles, list):
+        raise RuntimeError("Manba candle ro'yxatini qaytarmadi")
+
+    if len(candles) < requested_limit:
+        raise RuntimeError(
+            f"Tarix yetarli emas: {len(candles)}/{requested_limit} sham"
+        )
+
+    if not all(candle.is_closed for candle in candles):
+        raise RuntimeError("Yopilmagan sham aniqlandi")
+
+    sources = {candle.source for candle in candles}
+    if len(sources) != 1:
+        raise RuntimeError(
+            f"Bir timeframe ichida turli manbalar aralashgan: {sources}"
+        )
+
+    for previous, current in zip(candles, candles[1:]):
+        if current.timestamp <= previous.timestamp:
+            raise RuntimeError("Shamlar vaqti tartibsiz yoki takrorlangan")
+
+    source = candles[-1].source
+
+    with warnings.catch_warnings(record=True):
+        warnings.simplefilter("always")
+        gaps = data_adapter._inspect_candle_gaps(
+            candles,
+            timeframe,
+            source,
+            symbol,
+        )
+
+    tolerated_gaps = []
+
+    # Faqat ForexSB D1 tarixida bitta, 30 kundan eski uzilishga ruxsat.
+    # Bu uzilish to'ldirilmaydi va sun'iy sham yaratilmaydi.
+    if timeframe == "D1" and source == "forexsb" and len(gaps) == 1:
+        gap = gaps[0]
+        gap_end = int(gap.get("to", 0))
+        age_days = (
+            datetime.now(timezone.utc).timestamp() * 1000 - gap_end
+        ) / 86_400_000
+
+        if (
+            gap.get("missing_intervals") == 1
+            and age_days > OLD_D1_GAP_AGE_DAYS
+        ):
+            tolerated_gaps = [gap]
+            gaps = []
+
+    if tolerated_gaps:
+        logger.warning(
+            "[OLD D1 GAP ACCEPTED] %s %s | %s",
+            symbol,
+            timeframe,
+            tolerated_gaps[0],
+        )
+
+    if gaps:
+        raise RuntimeError(
+            f"Kutilmagan sham uzilishi: {len(gaps)} ta. "
+            f"Birinchi uzilishlar: {gaps[:3]}"
+        )
+
+    settings = data_adapter.TIMEFRAME_SETTINGS[timeframe]
+    duration_ms = settings["duration_ms"]
+
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    last_candle = candles[-1]
+    last_close_time = last_candle.timestamp + duration_ms
+    age_ms = max(0, now_ms - last_close_time)
+    age_hours = age_ms / 3_600_000
+
+    if symbol in data_adapter.BINANCE_SYMBOLS:
+        # Kripto 24/7 ishlaydi: eng so'nggi yopilgan sham juda yangi bo'lishi kerak.
+        max_age_ms = max(2 * duration_ms, 30 * 60 * 1000)
+    else:
+        # Forex/metallarda hafta oxiri va sessiya yopilishlari hisobga olinadi.
+        max_age_ms = MAX_FX_DATA_AGE_HOURS * 3_600_000
+
+    if age_ms > max_age_ms:
+        raise RuntimeError(
+            f"Eskirgan ma'lumot: oxirgi sham yoshi {age_hours:.2f} soat"
+        )
+
+    logger.info(
+        "[DATA QUALITY PASS] %s %s | candles=%s | source=%s | "
+        "first=%s | last=%s | age_hours=%.2f | gaps=0",
+        symbol,
+        timeframe,
+        len(candles),
+        source,
+        _format_time(candles[0].timestamp),
+        _format_time(last_candle.timestamp),
+        age_hours,
+    )
+
+    if symbol in data_adapter.BINANCE_SYMBOLS:
+        logger.warning(
+            "[CRYPTO FEED NOTE] %s Binance Spot %s juftligidan olinmoqda. "
+            "Bu broker CFD kotirovkasi bilan aynan bir xil bo'lmasligi mumkin.",
+            symbol,
+            data_adapter.BINANCE_SYMBOLS[symbol],
+        )
+
+
+def get_verified_market_data(
+    symbol,
+    timeframe,
+    limit=MINIMUM_HISTORY,
+):
+    if limit < MINIMUM_HISTORY:
+        raise ValueError(
+            f"V6 uchun kamida {MINIMUM_HISTORY} ta sham talab qilinadi"
+        )
+
+    data_adapter._validate_request(symbol, timeframe, limit)
+
+    errors = {}
+
+    for provider_name, provider_function in _get_providers(symbol):
+        try:
+            logger.info(
+                "[DATA SOURCE TRY] %s %s | provider=%s | requested=%s",
+                symbol,
+                timeframe,
+                provider_name,
+                limit,
+            )
+
+            with warnings.catch_warnings(record=True) as captured:
+                warnings.simplefilter("always")
+                candles = provider_function(
+                    symbol,
+                    timeframe,
+                    limit,
+                )
+
+            for warning in captured:
+                logger.warning(
+                    "[PROVIDER WARNING] %s %s | %s",
+                    symbol,
+                    timeframe,
+                    warning.message,
+                )
+
+            _validate_history(
+                symbol,
+                timeframe,
+                candles,
+                limit,
+            )
+
+            logger.info(
+                "[DATA SOURCE SELECTED] %s %s | %s",
+                symbol,
+                timeframe,
+                provider_name,
+            )
+
+            return MarketData(
+                symbol=symbol,
+                timeframe=timeframe,
+                candles=candles,
+            )
+
+        except Exception as error:
+            errors[provider_name] = str(error)
+            logger.warning(
+                "[DATA SOURCE REJECTED] %s %s | %s | %s",
+                symbol,
+                timeframe,
+                provider_name,
+                error,
+            )
+
+    details = " | ".join(
+        f"{name}: {message}"
+        for name, message in errors.items()
+    )
+
+    raise RuntimeError(
+        f"{symbol} {timeframe}: 1000 ta sifatli sham topilmadi. "
+        f"{details}"
+    )
