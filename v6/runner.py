@@ -385,30 +385,41 @@ def format_signal(result):
     )
 
 
+
 def get_public_entry_zone(result, candles_by_timeframe=None):
     """
-    Do'stlarga ko'rsatiladigan zona — oxirgi yopilgan M15 shamining
-    open/close tanasi. Signalning entry/SL/TP hisoblari o'zgarmaydi.
+    Do'stlar uchun kirish zonasi.
+    M15 shamida open/close bo'lsa, sham tanasidan foydalanadi.
+    Ular mavjud bo'lmasa, signal entry narxiga qaytadi.
+    Signalning entry/SL/TP hisoblari o'zgarmaydi.
     """
     signal = result.signal
     candles_by_timeframe = candles_by_timeframe or {}
     m15_candles = candles_by_timeframe.get("M15", [])
 
-    if not m15_candles:
-        if signal.entry is None:
-            return "N/A"
+    if m15_candles:
+        last_candle = m15_candles[-1]
+        open_price = getattr(last_candle, "open", None)
+        close_price = getattr(last_candle, "close", None)
 
-        price = format_price(signal.symbol, signal.entry)
-        return f"{price} – {price}"
+        if open_price is not None and close_price is not None:
+            try:
+                zone_low = min(float(open_price), float(close_price))
+                zone_high = max(float(open_price), float(close_price))
 
-    last_candle = m15_candles[-1]
-    zone_low = min(last_candle.open, last_candle.close)
-    zone_high = max(last_candle.open, last_candle.close)
+                return (
+                    f"{format_price(signal.symbol, zone_low)} – "
+                    f"{format_price(signal.symbol, zone_high)}"
+                )
+            except (TypeError, ValueError):
+                pass
 
-    return (
-        f"{format_price(signal.symbol, zone_low)} – "
-        f"{format_price(signal.symbol, zone_high)}"
-    )
+    if signal.entry is None:
+        return "N/A"
+
+    price = format_price(signal.symbol, signal.entry)
+    return f"{price} – {price}"
+
 
 
 def format_public_signal(result, candles_by_timeframe=None):
