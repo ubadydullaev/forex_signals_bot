@@ -419,6 +419,7 @@ def _aggregate_candles(candles, timeframe, symbol):
     return result
 
 
+
 def _diagnose_recent_candles(candles, symbol, timeframe):
     duration_ms = TIMEFRAME_MINUTES[timeframe] * 60 * 1000
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
@@ -436,7 +437,7 @@ def _diagnose_recent_candles(candles, symbol, timeframe):
             f"({len(recent)}/{DIAGNOSTIC_LIMIT})"
         )
 
-    gaps = []
+    all_gaps = []
 
     for previous, current in zip(recent, recent[1:]):
         previous_ts = int(previous["timestamp"])
@@ -459,7 +460,7 @@ def _diagnose_recent_candles(candles, symbol, timeframe):
         ]
 
         if unexpected:
-            gaps.append({
+            all_gaps.append({
                 "from": datetime.fromtimestamp(
                     previous_ts / 1000, timezone.utc
                 ).isoformat(),
@@ -467,7 +468,27 @@ def _diagnose_recent_candles(candles, symbol, timeframe):
                     current_ts / 1000, timezone.utc
                 ).isoformat(),
                 "missing": len(unexpected),
+                "age_days": (now_ms - current_ts) / 86400000,
             })
+
+    tolerated_gaps = []
+    gaps = list(all_gaps)
+
+    # Faqat bitta eski D1 uzilishiga ruxsat.
+    # Sham yaratilmaydi yoki narxlar to'ldirilmaydi.
+    if timeframe == "D1":
+        eligible = [
+            gap for gap in all_gaps
+            if gap["missing"] == 1
+            and gap["age_days"] > 30
+        ]
+
+        if len(eligible) == 1:
+            tolerated_gaps = eligible
+            gaps = [
+                gap for gap in all_gaps
+                if gap not in tolerated_gaps
+            ]
 
     first_ts = int(recent[0]["timestamp"])
     last_ts = int(recent[-1]["timestamp"])
@@ -484,12 +505,14 @@ def _diagnose_recent_candles(candles, symbol, timeframe):
         status = "FAIL_STALE_DATA"
     elif gaps:
         status = "FAIL_RECENT_GAPS"
+    elif tolerated_gaps:
+        status = "PASS_WITH_1_OLD_D1_GAP"
     else:
         status = "PASS"
 
     logger.info(
         "[FOREXSB QUALITY] %s %s | count=%s | first=%s | last=%s | "
-        "age_hours=%.2f | gaps=%s | status=%s",
+        "age_hours=%.2f | gaps=%s | tolerated=%s | status=%s",
         symbol,
         timeframe,
         len(recent),
@@ -497,8 +520,17 @@ def _diagnose_recent_candles(candles, symbol, timeframe):
         last_text,
         age_hours,
         len(gaps),
+        len(tolerated_gaps),
         status,
     )
+
+    for gap in tolerated_gaps:
+        logger.warning(
+            "[FOREXSB TOLERATED OLD D1 GAP] %s %s | %s",
+            symbol,
+            timeframe,
+            gap,
+        )
 
     for gap in gaps[:10]:
         logger.warning(
@@ -508,7 +540,7 @@ def _diagnose_recent_candles(candles, symbol, timeframe):
             gap,
         )
 
-    if status != "PASS":
+    if status.startswith("FAIL"):
         raise RuntimeError(
             f"{symbol} {timeframe}: ForexSB sifati tekshiruvdan o'tmadi: "
             f"{status}; gaps={len(gaps)}; age_hours={age_hours:.2f}"
