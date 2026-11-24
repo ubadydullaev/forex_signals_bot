@@ -245,6 +245,7 @@ def _records_to_candles(records, price_scale):
     return result
 
 
+
 def _aggregate_candles(candles, timeframe):
     target_minutes = TIMEFRAME_MINUTES[timeframe]
     source_minutes = 30
@@ -260,54 +261,65 @@ def _aggregate_candles(candles, timeframe):
 
     for candle in candles:
         timestamp = candle["timestamp"]
+        bucket_start = (timestamp // interval_ms) * interval_ms
 
-        bucket_start = (
-            timestamp // interval_ms
-        ) * interval_ms
-
-        buckets.setdefault(
-            bucket_start, []
-        ).append(candle)
+        buckets.setdefault(bucket_start, []).append(candle)
 
     result = []
 
     for bucket_start, items in sorted(buckets.items()):
-        items.sort(
-            key=lambda item: item["timestamp"]
-        )
-
-        if len(items) != required:
-            continue
-
-        expected_timestamps = [
-            bucket_start + index * source_ms
-            for index in range(required)
-        ]
+        items.sort(key=lambda item: item["timestamp"])
 
         actual_timestamps = [
-            item["timestamp"]
-            for item in items
+            item["timestamp"] for item in items
         ]
 
-        if actual_timestamps != expected_timestamps:
-            continue
+        # D1: Forex bozoridagi kunlik tanaffuslar va
+        # ayrim yetishmayotgan M30 shamlariga moslash.
+        if timeframe == "D1":
+            minimum_bars = 40
+
+            if len(items) < minimum_bars:
+                continue
+
+            # Kun boshi va oxiri yetarlicha qamrab olinganmi?
+            first_timestamp = actual_timestamps[0]
+            last_timestamp = actual_timestamps[-1]
+
+            if first_timestamp > bucket_start + 60 * 60 * 1000:
+                continue
+
+            if last_timestamp < bucket_start + 22 * 60 * 60 * 1000:
+                continue
+
+            # Bir xil timestamp takrorlangan bo‘lsa, rad etamiz.
+            if len(set(actual_timestamps)) != len(actual_timestamps):
+                continue
+
+        else:
+            # H1 va H4 uchun eski qat'iy tekshiruv saqlanadi.
+            if len(items) != required:
+                continue
+
+            expected_timestamps = [
+                bucket_start + index * source_ms
+                for index in range(required)
+            ]
+
+            if actual_timestamps != expected_timestamps:
+                continue
 
         result.append({
             "timestamp": bucket_start,
             "open": items[0]["open"],
-            "high": max(
-                item["high"] for item in items
-            ),
-            "low": min(
-                item["low"] for item in items
-            ),
+            "high": max(item["high"] for item in items),
+            "low": min(item["low"] for item in items),
             "close": items[-1]["close"],
-            "volume": sum(
-                item["volume"] for item in items
-            ),
+            "volume": sum(item["volume"] for item in items),
         })
 
     return result
+
 
 
 def get_forexsb_raw_candles(symbol, timeframe):
