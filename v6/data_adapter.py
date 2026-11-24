@@ -352,6 +352,7 @@ def _inspect_candle_gaps(candles, timeframe, source, symbol=None):
 
 
 
+
 def _build_candles(raw_candles, timeframe, source, limit, symbol=None):
     duration_ms = TIMEFRAME_SETTINGS[timeframe]["duration_ms"]
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
@@ -415,8 +416,7 @@ def _build_candles(raw_candles, timeframe, source, limit, symbol=None):
             f"{len(candles)}/{MIN_CANDLES}"
         )
 
-    _inspect_candle_gaps(candles, timeframe, source, symbol)
-
+    # Avval bot ishlatadigan oxirgi shamlarni tanlaymiz.
     result = candles[-limit:]
 
     if len(result) < MIN_CANDLES:
@@ -429,7 +429,12 @@ def _build_candles(raw_candles, timeframe, source, limit, symbol=None):
             f"{source} {timeframe}: yopilmagan sham aniqlandi"
         )
 
+    # Endi faqat tanlangan shamlar tekshiriladi.
+    # 2010-yildan qolgan tarixiy uzilishlar logni to'ldirmaydi.
+    _inspect_candle_gaps(result, timeframe, source, symbol)
+
     return result
+
 
 
 # =========================================================
