@@ -940,12 +940,14 @@ def _fetch_forexsb(symbol, timeframe, limit):
 # PUBLIC DATA API
 # =========================================================
 
+
 def get_candles(symbol, timeframe, limit=1000):
     """
-    Forex/metals:
+    Forex/metals manbalari:
         1. LSE
-        2. Dukascopy
-        3. Twelve Data
+        2. ForexSB
+        3. Dukascopy
+        4. Twelve Data
 
     Crypto:
         Binance
@@ -961,52 +963,41 @@ def get_candles(symbol, timeframe, limit=1000):
             f"{symbol} uchun ma'lumot manbasi aniqlanmagan"
         )
 
-    lse_error = None
+    errors = {}
 
-    try:
-        return _fetch_lse(symbol, timeframe, limit)
+    providers = [
+        ("LSE", _fetch_lse),
+        ("ForexSB", _fetch_forexsb),
+        ("Dukascopy", _fetch_dukascopy),
+        ("Twelve Data", _fetch_twelve_data_with_cache),
+    ]
 
-    except Exception as error:
-        lse_error = error
-        warnings.warn(
-            f"LSE {symbol} {timeframe} ishlamadi. "
-            f"Dukascopy fallback ishga tushadi: {error}",
-            RuntimeWarning,
-        )
+    for provider_name, provider_function in providers:
+        if provider_name == "Twelve Data" and symbol not in TWELVE_DATA_SYMBOLS:
+            continue
 
-    dukascopy_error = None
+        try:
+            return provider_function(symbol, timeframe, limit)
 
-    try:
-        return _fetch_dukascopy(symbol, timeframe, limit)
+        except Exception as error:
+            errors[provider_name] = str(error)
 
-    except Exception as error:
-        dukascopy_error = error
-        warnings.warn(
-            f"Dukascopy {symbol} {timeframe} ishlamadi. "
-            f"Twelve Data fallback ishga tushadi: {error}",
-            RuntimeWarning,
-        )
+            warnings.warn(
+                f"{provider_name} {symbol} {timeframe} ishlamadi. "
+                f"Keyingi manba sinab ko'riladi: {error}",
+                RuntimeWarning,
+            )
 
-    if symbol not in TWELVE_DATA_SYMBOLS:
-        raise RuntimeError(
-            f"{symbol} uchun barcha manbalar ishlamadi. "
-            f"LSE: {lse_error}. Dukascopy: {dukascopy_error}"
-        )
+    error_details = " | ".join(
+        f"{name}: {message}"
+        for name, message in errors.items()
+    )
 
-    try:
-        return _fetch_twelve_data_with_cache(
-            symbol,
-            timeframe,
-            limit,
-        )
+    raise RuntimeError(
+        f"{symbol} {timeframe}: barcha ma'lumot manbalari ishlamadi. "
+        f"{error_details}"
+    )
 
-    except Exception as twelve_error:
-        raise RuntimeError(
-            f"{symbol} {timeframe}: barcha manbalar ishlamadi. "
-            f"LSE: {lse_error}. "
-            f"Dukascopy: {dukascopy_error}. "
-            f"Twelve Data: {twelve_error}"
-        ) from twelve_error
 
 
 def get_market_data(symbol, timeframe, limit=1000):
