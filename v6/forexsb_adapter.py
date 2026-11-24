@@ -230,22 +230,94 @@ def _easter_sunday(year):
     return datetime(year, month, day).date()
 
 
+
+def _nth_weekday(year, month, weekday, n):
+    first = datetime(year, month, 1).date()
+    offset = (weekday - first.weekday()) % 7
+    return first + timedelta(days=offset + (n - 1) * 7)
+
+
+def _last_weekday(year, month, weekday):
+    if month == 12:
+        last = datetime(year + 1, 1, 1).date() - timedelta(days=1)
+    else:
+        last = datetime(year, month + 1, 1).date() - timedelta(days=1)
+
+    return last - timedelta(days=(last.weekday() - weekday) % 7)
+
+
+def _observed_date(day):
+    if day.weekday() == 5:
+        return day - timedelta(days=1)
+    if day.weekday() == 6:
+        return day + timedelta(days=1)
+    return day
+
+
+def _us_market_holidays(year):
+    holidays = {
+        _nth_weekday(year, 1, 0, 3),   # Martin Luther King Jr. Day
+        _nth_weekday(year, 2, 0, 3),   # Presidents Day
+        _last_weekday(year, 5, 0),     # Memorial Day
+        _nth_weekday(year, 9, 0, 1),   # Labor Day
+        _nth_weekday(year, 11, 3, 4),  # Thanksgiving
+    }
+
+    fixed_dates = [
+        (1, 1),
+        (6, 19),
+        (7, 4),
+        (12, 25),
+    ]
+
+    for month, day in fixed_dates:
+        holidays.add(
+            _observed_date(datetime(year, month, day).date())
+        )
+
+    thanksgiving = _nth_weekday(year, 11, 3, 4)
+    holidays.add(thanksgiving + timedelta(days=1))
+
+    christmas_eve = datetime(year, 12, 24).date()
+    new_year_eve = datetime(year, 12, 31).date()
+
+    holidays.add(christmas_eve)
+    holidays.add(new_year_eve)
+
+    good_friday = _easter_sunday(year) - timedelta(days=2)
+    holidays.add(good_friday)
+    holidays.add(good_friday - timedelta(days=1))
+
+    return holidays
+
+
 def _expected_closure(timestamp, symbol, timeframe):
     dt = datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc)
+    market_date = dt.date()
+
+    holidays = (
+        _us_market_holidays(market_date.year)
+        | _us_market_holidays(market_date.year - 1)
+        | _us_market_holidays(market_date.year + 1)
+    )
 
     if timeframe == "D1":
-        day = dt.date()
-        if day.weekday() >= 5:
-            return True
-        return day == (_easter_sunday(day.year) - timedelta(days=2))
+        return market_date.weekday() >= 5 or market_date in holidays
 
     market_tz = ZoneInfo("America/New_York")
     local = dt.astimezone(market_tz)
     weekday = local.weekday()
     clock = local.time().replace(tzinfo=None)
 
+    if market_date in holidays:
+        return True
+
     close_time = dt_time(17, 0)
-    open_time = dt_time(18, 0) if symbol in ("XAUUSD", "XAGUSD") else dt_time(17, 0)
+    open_time = (
+        dt_time(18, 0)
+        if symbol in ("XAUUSD", "XAGUSD")
+        else dt_time(17, 0)
+    )
 
     if weekday == 5:
         return True
@@ -261,6 +333,7 @@ def _expected_closure(timestamp, symbol, timeframe):
             return True
 
     return False
+
 
 
 def _aggregate_candles(candles, timeframe, symbol):
