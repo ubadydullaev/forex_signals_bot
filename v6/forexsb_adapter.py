@@ -230,7 +230,6 @@ def _easter_sunday(year):
     return datetime(year, month, day).date()
 
 
-
 def _nth_weekday(year, month, weekday, n):
     first = datetime(year, month, 1).date()
     offset = (weekday - first.weekday()) % 7
@@ -256,33 +255,21 @@ def _observed_date(day):
 
 def _us_market_holidays(year):
     holidays = {
-        _nth_weekday(year, 1, 0, 3),   # Martin Luther King Jr. Day
-        _nth_weekday(year, 2, 0, 3),   # Presidents Day
-        _last_weekday(year, 5, 0),     # Memorial Day
-        _nth_weekday(year, 9, 0, 1),   # Labor Day
-        _nth_weekday(year, 11, 3, 4),  # Thanksgiving
+        _nth_weekday(year, 1, 0, 3),
+        _nth_weekday(year, 2, 0, 3),
+        _last_weekday(year, 5, 0),
+        _nth_weekday(year, 9, 0, 1),
+        _nth_weekday(year, 11, 3, 4),
     }
 
-    fixed_dates = [
-        (1, 1),
-        (6, 19),
-        (7, 4),
-        (12, 25),
-    ]
-
-    for month, day in fixed_dates:
-        holidays.add(
-            _observed_date(datetime(year, month, day).date())
-        )
+    for month, day in [(1, 1), (6, 19), (7, 4), (12, 25)]:
+        holidays.add(_observed_date(datetime(year, month, day).date()))
 
     thanksgiving = _nth_weekday(year, 11, 3, 4)
     holidays.add(thanksgiving + timedelta(days=1))
 
-    christmas_eve = datetime(year, 12, 24).date()
-    new_year_eve = datetime(year, 12, 31).date()
-
-    holidays.add(christmas_eve)
-    holidays.add(new_year_eve)
+    holidays.add(datetime(year, 12, 24).date())
+    holidays.add(datetime(year, 12, 31).date())
 
     good_friday = _easter_sunday(year) - timedelta(days=2)
     holidays.add(good_friday)
@@ -335,7 +322,6 @@ def _expected_closure(timestamp, symbol, timeframe):
     return False
 
 
-
 def _aggregate_candles(candles, timeframe, symbol):
     if timeframe in ("M15", "M30"):
         return candles
@@ -348,6 +334,7 @@ def _aggregate_candles(candles, timeframe, symbol):
     base_ms = 30 * 60 * 1000
 
     buckets = {}
+
     for candle in candles:
         bucket_start = (candle["timestamp"] // target_ms) * target_ms
         buckets.setdefault(bucket_start, []).append(candle)
@@ -362,48 +349,61 @@ def _aggregate_candles(candles, timeframe, symbol):
             continue
 
         if timeframe == "H1":
-            expected_count = 2
-            expected = [bucket_start + i * base_ms for i in range(expected_count)]
+            expected = [
+                bucket_start,
+                bucket_start + base_ms,
+            ]
 
             if timestamps != expected:
                 continue
 
         elif timeframe == "H4":
-            expected_count = 8
-            expected = [bucket_start + i * base_ms for i in range(expected_count)]
+            expected = [
+                bucket_start + i * base_ms
+                for i in range(8)
+            ]
             present = set(timestamps)
             missing = [ts for ts in expected if ts not in present]
 
-            # H4 chegarasidagi qisqa sham: faqat bozor yopilishi
-            # sababli yetishmagan M30 intervallariga ruxsat beriladi.
+            # Qisqa juma sessiyasida 2 ta M30 sham ham qabul qilinadi.
             if missing:
-                if len(items) < 4:
+                if len(items) < 2:
                     continue
+
                 if not all(
                     _expected_closure(ts, symbol, "M30")
                     for ts in missing
                 ):
                     continue
 
-        else:  # D1
-            expected_count = 48
-            expected = [bucket_start + i * base_ms for i in range(expected_count)]
+        else:
+            expected = [
+                bucket_start + i * base_ms
+                for i in range(48)
+            ]
             present = set(timestamps)
             missing = [ts for ts in expected if ts not in present]
 
-            # D1: bozor yopilishidagi intervallarni hisobga olamiz.
-            if len(items) < 40:
+            # D1 qisqa bayram sessiyasi uchun minimal talab.
+            if len(items) < 24:
                 continue
 
-            if timestamps[0] > bucket_start + 60 * 60 * 1000:
+            if timestamps[0] > bucket_start + 4 * 60 * 60 * 1000:
                 continue
 
-            if timestamps[-1] < bucket_start + 20 * 60 * 60 * 1000:
+            if timestamps[-1] < bucket_start + 17 * 60 * 60 * 1000:
                 continue
 
-            if missing and not all(
+            # Ichki yo'qolgan shamlar faqat bozor yopilgan vaqtda ruxsat.
+            # Oxirgi shamdan keyingi yopilish vaqti qisqa sessiya bo'lishi mumkin.
+            last_timestamp = timestamps[-1]
+            internal_missing = [
+                ts for ts in missing if ts < last_timestamp
+            ]
+
+            if internal_missing and not all(
                 _expected_closure(ts, symbol, "M30")
-                for ts in missing
+                for ts in internal_missing
             ):
                 continue
 
@@ -443,9 +443,16 @@ def _diagnose_recent_candles(candles, symbol, timeframe):
         current_ts = int(current["timestamp"])
 
         if current_ts <= previous_ts:
-            raise RuntimeError(f"{symbol} {timeframe}: timestamp tartibi noto'g'ri")
+            raise RuntimeError(
+                f"{symbol} {timeframe}: timestamp tartibi noto'g'ri"
+            )
 
-        missing = range(previous_ts + duration_ms, current_ts, duration_ms)
+        missing = range(
+            previous_ts + duration_ms,
+            current_ts,
+            duration_ms,
+        )
+
         unexpected = [
             ts for ts in missing
             if not _expected_closure(ts, symbol, timeframe)
@@ -483,14 +490,22 @@ def _diagnose_recent_candles(candles, symbol, timeframe):
     logger.info(
         "[FOREXSB QUALITY] %s %s | count=%s | first=%s | last=%s | "
         "age_hours=%.2f | gaps=%s | status=%s",
-        symbol, timeframe, len(recent), first_text, last_text,
-        age_hours, len(gaps), status,
+        symbol,
+        timeframe,
+        len(recent),
+        first_text,
+        last_text,
+        age_hours,
+        len(gaps),
+        status,
     )
 
     for gap in gaps[:10]:
         logger.warning(
             "[FOREXSB RECENT GAP] %s %s | %s",
-            symbol, timeframe, gap,
+            symbol,
+            timeframe,
+            gap,
         )
 
     if status != "PASS":
