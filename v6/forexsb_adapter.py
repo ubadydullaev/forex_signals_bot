@@ -21,7 +21,7 @@ TIMEFRAME_MINUTES = {
 
 session = requests.Session()
 session.headers.update({
-    "User-Agent": "ForexSignalsBot-V6/6.0"
+    "User-Agent": "Mozilla/5.0"
 })
 
 _metadata_cache = None
