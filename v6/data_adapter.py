@@ -269,13 +269,19 @@ def _is_expected_market_closure(timestamp, symbol, timeframe=None):
 # =========================================================
 
 
+
 def _is_expected_d1_closure(market_date):
-    """Forex/metall D1 shamlarida savdo bo'lmaydigan sanalar."""
     if market_date.weekday() >= 5:
         return True
 
-    good_friday = _easter_sunday(market_date.year) - timedelta(days=2)
-    return market_date == good_friday
+    holidays = (
+        _us_market_holidays(market_date.year)
+        | _us_market_holidays(market_date.year - 1)
+        | _us_market_holidays(market_date.year + 1)
+    )
+
+    return market_date in holidays
+
 
 
 def _inspect_candle_gaps(candles, timeframe, source, symbol=None):
