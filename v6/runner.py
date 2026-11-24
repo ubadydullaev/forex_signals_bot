@@ -1,3 +1,4 @@
+
 import base64
 import html
 import json
@@ -384,27 +385,63 @@ def format_signal(result):
     )
 
 
-def format_public_signal(result):
-    """Boshqa foydalanuvchilar uchun faqat savdo parametrlari."""
+def get_public_entry_zone(result, candles_by_timeframe=None):
+    """
+    Do'stlarga ko'rsatiladigan zona — oxirgi yopilgan M15 shamining
+    open/close tanasi. Signalning entry/SL/TP hisoblari o'zgarmaydi.
+    """
     signal = result.signal
+    candles_by_timeframe = candles_by_timeframe or {}
+    m15_candles = candles_by_timeframe.get("M15", [])
 
+    if not m15_candles:
+        if signal.entry is None:
+            return "N/A"
+
+        price = format_price(signal.symbol, signal.entry)
+        return f"{price} – {price}"
+
+    last_candle = m15_candles[-1]
+    zone_low = min(last_candle.open, last_candle.close)
+    zone_high = max(last_candle.open, last_candle.close)
+
+    return (
+        f"{format_price(signal.symbol, zone_low)} – "
+        f"{format_price(signal.symbol, zone_high)}"
+    )
+
+
+def format_public_signal(result, candles_by_timeframe=None):
+    """Do'stlar uchun faqat BUY/SELL, kirish zonasi, SL va TP."""
+    signal = result.signal
     emoji = "🟢" if signal.side == "BUY" else "🔴"
+    entry_zone = get_public_entry_zone(
+        result,
+        candles_by_timeframe,
+    )
 
     return (
         f"{emoji} <b>{html.escape(signal.symbol)} "
         f"{html.escape(signal.side)}</b>\n"
-        f"Kirish: <code>{format_price(signal.symbol, signal.entry)}</code>\n"
+        f"Kirish zonasi: <code>{entry_zone}</code>\n"
         f"SL: <code>{format_price(signal.symbol, signal.stop_loss)}</code>\n"
         f"TP: <code>{format_price(signal.symbol, signal.take_profit)}</code>"
     )
 
 
-def format_signal_for_user(result, user_id):
+def format_signal_for_user(
+    result,
+    user_id,
+    candles_by_timeframe=None,
+):
     """Admin va boshqa foydalanuvchilar uchun alohida format."""
     if str(user_id).strip() == str(ADMIN_ID).strip():
         return format_signal(result)
 
-    return format_public_signal(result)
+    return format_public_signal(
+        result,
+        candles_by_timeframe,
+    )
 
 
 def fetch_symbol_data(symbol):
@@ -601,7 +638,11 @@ def main():
 
             for user in pending_users:
                 try:
-                    message = format_signal_for_user(result, user)
+                    message = format_signal_for_user(
+                        result,
+                        user,
+                        candles_by_timeframe,
+                    )
 
                     if not send_telegram(user, message):
                         raise RuntimeError(
