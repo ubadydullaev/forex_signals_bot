@@ -1,3 +1,4 @@
+
 import logging
 import warnings
 from datetime import datetime, timezone
@@ -10,7 +11,7 @@ logger = logging.getLogger("V6.DATA")
 
 MINIMUM_HISTORY = 1000
 MAX_FX_DATA_AGE_HOURS = 72
-OLD_D1_GAP_AGE_DAYS = 30
+OLD_GAP_AGE_DAYS = 30
 
 
 def _get_providers(symbol):
@@ -40,6 +41,37 @@ def _format_time(timestamp):
     ).isoformat()
 
 
+def _gap_age_days(gap, now_ms):
+    gap_end = int(gap.get("to", 0))
+    if gap_end <= 0:
+        return -1
+
+    return (now_ms - gap_end) / 86_400_000
+
+
+def _is_tolerable_old_gap(gap, timeframe, source, now_ms):
+    """
+    Faqat ForexSB tarixidagi alohida bitta shamlik eski uzilishga ruxsat.
+    Yangi uzilishlar va ketma-ket bir nechta yo'qolgan shamlar rad etiladi.
+    """
+    if source != "forexsb":
+        return False
+
+    if gap.get("missing_intervals") != 1:
+        return False
+
+    age_days = _gap_age_days(gap, now_ms)
+    if age_days <= OLD_GAP_AGE_DAYS:
+        return False
+
+    # D1 uchun tekshiruv _inspect_candle_gaps tomonidan savdo kunlari
+    # hisobida tuzilgan. H4 va boshqa TF uchun bitta interval tekshiriladi.
+    if timeframe not in ("M15", "M30", "H1", "H4", "D1"):
+        return False
+
+    return True
+
+
 def _validate_history(symbol, timeframe, candles, requested_limit):
     if not isinstance(candles, list):
         raise RuntimeError("Manba candle ro'yxatini qaytarmadi")
@@ -63,6 +95,7 @@ def _validate_history(symbol, timeframe, candles, requested_limit):
             raise RuntimeError("Shamlar vaqti tartibsiz yoki takrorlangan")
 
     source = candles[-1].source
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
 
     with warnings.catch_warnings(record=True):
         warnings.simplefilter("always")
@@ -73,52 +106,42 @@ def _validate_history(symbol, timeframe, candles, requested_limit):
             symbol,
         )
 
-    tolerated_gaps = []
+    accepted_gaps = []
+    rejected_gaps = []
 
-    # Faqat ForexSB D1 tarixida bitta, 30 kundan eski uzilishga ruxsat.
-    # Bu uzilish to'ldirilmaydi va sun'iy sham yaratilmaydi.
-    if timeframe == "D1" and source == "forexsb" and len(gaps) == 1:
-        gap = gaps[0]
-        gap_end = int(gap.get("to", 0))
-        age_days = (
-            datetime.now(timezone.utc).timestamp() * 1000 - gap_end
-        ) / 86_400_000
+    for gap in gaps:
+        if _is_tolerable_old_gap(gap, timeframe, source, now_ms):
+            accepted_gaps.append(gap)
+        else:
+            rejected_gaps.append(gap)
 
-        if (
-            gap.get("missing_intervals") == 1
-            and age_days > OLD_D1_GAP_AGE_DAYS
-        ):
-            tolerated_gaps = [gap]
-            gaps = []
-
-    if tolerated_gaps:
+    for gap in accepted_gaps:
         logger.warning(
-            "[OLD D1 GAP ACCEPTED] %s %s | %s",
+            "[OLD ISOLATED GAP ACCEPTED] %s %s | age_days=%.1f | gap=%s",
             symbol,
             timeframe,
-            tolerated_gaps[0],
+            _gap_age_days(gap, now_ms),
+            gap,
         )
 
-    if gaps:
+    if rejected_gaps:
         raise RuntimeError(
-            f"Kutilmagan sham uzilishi: {len(gaps)} ta. "
-            f"Birinchi uzilishlar: {gaps[:3]}"
+            f"Kutilmagan sham uzilishi: {len(rejected_gaps)} ta. "
+            f"Birinchi uzilishlar: {rejected_gaps[:3]}"
         )
 
-    settings = data_adapter.TIMEFRAME_SETTINGS[timeframe]
-    duration_ms = settings["duration_ms"]
+    duration_ms = data_adapter.TIMEFRAME_SETTINGS[timeframe]["duration_ms"]
 
-    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     last_candle = candles[-1]
     last_close_time = last_candle.timestamp + duration_ms
     age_ms = max(0, now_ms - last_close_time)
     age_hours = age_ms / 3_600_000
 
     if symbol in data_adapter.BINANCE_SYMBOLS:
-        # Kripto 24/7 ishlaydi: eng so'nggi yopilgan sham juda yangi bo'lishi kerak.
+        # Kripto 24/7 ishlaydi: oxirgi yopilgan sham yangiligi qat'iy tekshiriladi.
         max_age_ms = max(2 * duration_ms, 30 * 60 * 1000)
     else:
-        # Forex/metallarda hafta oxiri va sessiya yopilishlari hisobga olinadi.
+        # Forex/metallarda sessiya va dam olish kunlari hisobga olinadi.
         max_age_ms = MAX_FX_DATA_AGE_HOURS * 3_600_000
 
     if age_ms > max_age_ms:
@@ -128,7 +151,7 @@ def _validate_history(symbol, timeframe, candles, requested_limit):
 
     logger.info(
         "[DATA QUALITY PASS] %s %s | candles=%s | source=%s | "
-        "first=%s | last=%s | age_hours=%.2f | gaps=0",
+        "first=%s | last=%s | age_hours=%.2f | accepted_old_gaps=%s",
         symbol,
         timeframe,
         len(candles),
@@ -136,6 +159,7 @@ def _validate_history(symbol, timeframe, candles, requested_limit):
         _format_time(candles[0].timestamp),
         _format_time(last_candle.timestamp),
         age_hours,
+        len(accepted_gaps),
     )
 
     if symbol in data_adapter.BINANCE_SYMBOLS:
@@ -223,6 +247,6 @@ def get_verified_market_data(
     )
 
     raise RuntimeError(
-        f"{symbol} {timeframe}: 1000 ta sifatli sham topilmadi. "
+        f"{symbol} {timeframe}: {limit} ta sifatli sham topilmadi. "
         f"{details}"
     )
