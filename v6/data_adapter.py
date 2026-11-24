@@ -214,9 +214,9 @@ def _is_expected_market_closure(timestamp, symbol, timeframe=None):
 # CANDLE NORMALIZATION AND GAP CHECK
 # =========================================================
 
-def _inspect_candle_gaps(candles, timeframe, source, symbol=None):
+
 def _is_expected_d1_closure(market_date):
-    """Forex/metall D1 shamlarida savdo bo'lmaydigan sanalarni aniqlaydi."""
+    """Forex/metall D1 shamlarida savdo bo'lmaydigan sanalar."""
     if market_date.weekday() >= 5:
         return True
 
@@ -239,24 +239,33 @@ def _inspect_candle_gaps(candles, timeframe, source, symbol=None):
                 f"{source} {timeframe}: timestamp tartibi noto'g'ri"
             )
 
-        # Forex va metallar D1 shamlarida DST sabab 23/25 soatlik
-        # interval bo'lishi mumkin. Shuning uchun bozor sanalari tekshiriladi.
         if (
             timeframe == "D1"
-            and source in ("dukascopy", "lse", "twelve_data")
+            and source in ("dukascopy", "lse", "twelve_data", "forexsb")
             and symbol in DUKASCOPY_SYMBOLS
         ):
-            market_tz = ZoneInfo("America/New_York")
+            if source == "forexsb":
+                previous_date = datetime.fromtimestamp(
+                    previous.timestamp / 1000,
+                    tz=timezone.utc,
+                ).date()
 
-            previous_date = datetime.fromtimestamp(
-                previous.timestamp / 1000,
-                tz=timezone.utc,
-            ).astimezone(market_tz).date()
+                current_date = datetime.fromtimestamp(
+                    current.timestamp / 1000,
+                    tz=timezone.utc,
+                ).date()
+            else:
+                market_tz = ZoneInfo("America/New_York")
 
-            current_date = datetime.fromtimestamp(
-                current.timestamp / 1000,
-                tz=timezone.utc,
-            ).astimezone(market_tz).date()
+                previous_date = datetime.fromtimestamp(
+                    previous.timestamp / 1000,
+                    tz=timezone.utc,
+                ).astimezone(market_tz).date()
+
+                current_date = datetime.fromtimestamp(
+                    current.timestamp / 1000,
+                    tz=timezone.utc,
+                ).astimezone(market_tz).date()
 
             if current_date <= previous_date:
                 gaps.append({
@@ -312,7 +321,7 @@ def _inspect_candle_gaps(candles, timeframe, source, symbol=None):
         )
 
         expected_closure = (
-            source in ("dukascopy", "lse", "twelve_data")
+            source in ("dukascopy", "lse", "twelve_data", "forexsb")
             and symbol is not None
             and bool(missing)
             and all(
@@ -340,6 +349,7 @@ def _inspect_candle_gaps(candles, timeframe, source, symbol=None):
         )
 
     return gaps
+
 
 
 def _build_candles(raw_candles, timeframe, source, limit, symbol=None):
@@ -912,7 +922,19 @@ def _fetch_lse(symbol, timeframe, limit):
         min(limit, 250),
         symbol,
     )
+def _fetch_forexsb(symbol, timeframe, limit):
+    raw_candles = get_forexsb_raw_candles(
+        symbol=symbol,
+        timeframe=timeframe,
+    )
 
+    return _build_candles(
+        raw_candles,
+        timeframe,
+        "forexsb",
+        limit,
+        symbol,
+    )
 
 # =========================================================
 # PUBLIC DATA API
