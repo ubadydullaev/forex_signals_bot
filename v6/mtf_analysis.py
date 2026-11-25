@@ -16,7 +16,10 @@ TIMEFRAME_WEIGHTS = {
 }
 
 ALIGNMENT_TIMEFRAMES = ("D1", "H4", "H1", "M30")
+HIGHER_TIMEFRAMES = ("D1", "H4", "H1")
 DIRECTIONAL_TRENDS = ("BULLISH", "BEARISH")
+
+MINIMUM_HIGHER_CONFIRMATIONS = 2
 
 
 def _last_valid(values: list) -> Optional[float]:
@@ -96,6 +99,7 @@ def analyze_single_timeframe(
         if ema_trend == "BULLISH":
             trend = "BULLISH"
             supertrend_confirmed = True
+
         elif ema_trend == "BEARISH":
             trend = "RANGING"
             reasons.append("EMA and Supertrend disagree")
@@ -106,6 +110,7 @@ def analyze_single_timeframe(
         if ema_trend == "BEARISH":
             trend = "BEARISH"
             supertrend_confirmed = True
+
         elif ema_trend == "BULLISH":
             trend = "RANGING"
             reasons.append("EMA and Supertrend disagree")
@@ -166,6 +171,8 @@ def analyze_mtf(
         for timeframe in ALIGNMENT_TIMEFRAMES
     )
 
+    # Yo'nalishi aniq bo'lgan timeframe'largina ovoz beradi.
+    # Qarama-qarshi yo'nalishdagi timeframe ham hisobga olinadi.
     for timeframe in ALIGNMENT_TIMEFRAMES:
         result = timeframe_results[timeframe]
         weight = TIMEFRAME_WEIGHTS[timeframe]
@@ -181,36 +188,52 @@ def analyze_mtf(
         else:
             bearish_score += weight
 
-    if bullish_score == 0 and bearish_score == 0:
+    # Moslik faqat yo'nalishi aniqlangan timeframe'lar
+    # umumiy vazniga nisbatan hisoblanadi.
+    if available_weight <= 0:
         overall_trend = "UNKNOWN"
         alignment = 0.0
 
     elif bullish_score > bearish_score:
         overall_trend = "BULLISH"
-        alignment = bullish_score / total_weight * 100.0
+        alignment = bullish_score / available_weight * 100.0
 
     elif bearish_score > bullish_score:
         overall_trend = "BEARISH"
-        alignment = bearish_score / total_weight * 100.0
+        alignment = bearish_score / available_weight * 100.0
 
     else:
         overall_trend = "RANGING"
         alignment = max(
             bullish_score,
             bearish_score,
-        ) / total_weight * 100.0
+        ) / available_weight * 100.0
+
+    # D1, H4, H1 ichidan kamida ikkitasi bir yo'nalishda.
+    higher_confirmations = 0
+
+    if overall_trend in DIRECTIONAL_TRENDS:
+        higher_confirmations = sum(
+            1
+            for timeframe in HIGHER_TIMEFRAMES
+            if timeframe_results[timeframe]["trend"] == overall_trend
+        )
 
     higher_confirmation = (
         overall_trend in DIRECTIONAL_TRENDS
-        and all(
-            timeframe_results[timeframe]["trend"] == overall_trend
-            for timeframe in ("D1", "H4", "H1")
-        )
+        and higher_confirmations >= MINIMUM_HIGHER_CONFIRMATIONS
     )
 
+    # M30 alohida tasdiqlovchi timeframe bo'lib qoladi.
     lower_confirmation = (
         overall_trend in DIRECTIONAL_TRENDS
         and timeframe_results["M30"]["trend"] == overall_trend
+    )
+
+    coverage_percent = (
+        available_weight / total_weight * 100.0
+        if total_weight > 0
+        else 0.0
     )
 
     return {
@@ -218,8 +241,11 @@ def analyze_mtf(
         "alignment_percent": round(alignment, 2),
         "total_weight": total_weight,
         "available_weight": available_weight,
+        "coverage_percent": round(coverage_percent, 2),
         "bullish_score": bullish_score,
         "bearish_score": bearish_score,
+        "higher_confirmations": higher_confirmations,
+        "higher_required": MINIMUM_HIGHER_CONFIRMATIONS,
         "higher_confirmation": higher_confirmation,
         "lower_confirmation": lower_confirmation,
         "timeframe_results": timeframe_results,
