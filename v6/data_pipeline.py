@@ -13,6 +13,9 @@ MINIMUM_HISTORY = 1000
 MAX_FX_DATA_AGE_HOURS = 72
 OLD_GAP_AGE_DAYS = 30
 
+# Dukascopy 403 qaytarsa, shu workflow run davomida qayta chaqirilmaydi.
+_DUKASCOPY_BLOCKED = False
+
 
 def _get_providers(symbol):
     if symbol in data_adapter.BINANCE_SYMBOLS:
@@ -30,7 +33,6 @@ def _get_providers(symbol):
             ("Twelve Data", data_adapter._fetch_twelve_data_with_cache)
         )
 
-    # LSE oxirgi zaxira: kunlik limit xatolari asosiy tahlilni sekinlashtirmasin.
     providers.append(("LSE", data_adapter._fetch_lse))
 
     return providers
@@ -157,11 +159,21 @@ def _validate_history(symbol, timeframe, candles, requested_limit):
         )
 
 
+def _is_dukascopy_403(error):
+    message = str(error).lower()
+    return (
+        "http 403" in message
+        or "refused access (http 403)" in message
+    )
+
+
 def get_verified_market_data(
     symbol,
     timeframe,
     limit=MINIMUM_HISTORY,
 ):
+    global _DUKASCOPY_BLOCKED
+
     if limit < MINIMUM_HISTORY:
         raise ValueError(
             f"V6 uchun kamida {MINIMUM_HISTORY} ta sham talab qilinadi"
@@ -172,6 +184,16 @@ def get_verified_market_data(
     errors = {}
 
     for provider_name, provider_function in _get_providers(symbol):
+
+        if provider_name == "Dukascopy" and _DUKASCOPY_BLOCKED:
+            logger.warning(
+                "[PROVIDER SKIPPED] %s %s | Dukascopy oldingi HTTP 403 "
+                "sababli shu run davomida vaqtincha o'tkazib yuborildi",
+                symbol,
+                timeframe,
+            )
+            continue
+
         try:
             logger.info(
                 "[DATA SOURCE TRY] %s %s | provider=%s | requested=%s",
@@ -210,6 +232,17 @@ def get_verified_market_data(
 
         except Exception as error:
             errors[provider_name] = str(error)
+
+            if (
+                provider_name == "Dukascopy"
+                and _is_dukascopy_403(error)
+            ):
+                _DUKASCOPY_BLOCKED = True
+                logger.error(
+                    "[DUKASCOPY CIRCUIT BREAKER] HTTP 403 aniqlandi. "
+                    "Qolgan instrumentlarda Dukascopy o'tkazib yuboriladi."
+                )
+
             logger.warning(
                 "[DATA SOURCE REJECTED] %s %s | %s | %s",
                 symbol,
