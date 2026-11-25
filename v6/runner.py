@@ -37,7 +37,7 @@ GITHUB_BRANCH = os.getenv("GITHUB_REF_NAME", "main")
 STATE_FILE = "v6_signal_state.json"
 
 session = requests.Session()
-session.headers.update({"User-Agent": "ForexSignalsBot-V6/6.0"})
+session.headers.update({"User-Agent": "ForexSignalsBot-V6/6.1"})
 
 logging.basicConfig(
     level=logging.INFO,
@@ -55,22 +55,23 @@ def validate_environment():
         logger.info("Telegram dry-run rejimida.")
         return
 
-    if TELEGRAM_SELF_TEST:
-        required = {
-            "TELEGRAM_BOT_TOKEN": BOT_TOKEN,
-            "TELEGRAM_CHAT_ID": ADMIN_ID,
-        }
-    else:
-        required = {
-            "TELEGRAM_BOT_TOKEN": BOT_TOKEN,
-            "TELEGRAM_CHAT_ID": ADMIN_ID,
+    required = {
+        "TELEGRAM_BOT_TOKEN": BOT_TOKEN,
+        "TELEGRAM_CHAT_ID": ADMIN_ID,
+    }
+
+    if not TELEGRAM_SELF_TEST:
+        required.update({
             "CLOUDFLARE_WORKER_URL": WORKER_URL,
             "WEBHOOK_SECRET": WEBHOOK_SECRET,
             "GITHUB_TOKEN": GITHUB_TOKEN,
             "GITHUB_REPOSITORY": GITHUB_REPOSITORY,
-        }
+        })
 
-    missing = [name for name, value in required.items() if not value]
+    missing = [
+        name for name, value in required.items()
+        if not value
+    ]
 
     if missing:
         raise RuntimeError(
@@ -98,7 +99,9 @@ def send_telegram(chat_id, message):
     result = response.json()
 
     if not result.get("ok"):
-        raise RuntimeError("Telegram API xatosi: " + str(result))
+        raise RuntimeError(
+            "Telegram API xatosi: " + str(result)
+        )
 
     return True
 
@@ -115,6 +118,7 @@ def run_telegram_self_test():
         raise RuntimeError("Telegram test xabari yuborilmadi.")
 
     logger.info("[TELEGRAM SELF TEST OK]")
+
     return {
         "analyzed": 0,
         "buy": 0,
@@ -139,7 +143,9 @@ def get_users():
     users = payload.get("users", [])
 
     if not isinstance(users, list):
-        raise RuntimeError("Worker users ro'yxatini noto'g'ri qaytardi.")
+        raise RuntimeError(
+            "Worker users ro'yxatini noto'g'ri qaytardi."
+        )
 
     normalized = {
         str(user).strip()
@@ -148,12 +154,13 @@ def get_users():
     }
 
     normalized.add(str(ADMIN_ID).strip())
+
     return sorted(normalized)
 
 
 def state_url():
     return (
-        f"https://api.github.com/repos/"
+        "https://api.github.com/repos/"
         f"{GITHUB_REPOSITORY}/contents/{STATE_FILE}"
     )
 
@@ -177,10 +184,14 @@ def validate_state(state):
 
     for key, record in signals.items():
         if not isinstance(key, str) or not isinstance(record, dict):
-            raise RuntimeError("V6 state ichida noto'g'ri signal yozuvi.")
+            raise RuntimeError(
+                "V6 state ichida noto'g'ri signal yozuvi."
+            )
 
         if not isinstance(record.get("delivered_to", []), list):
-            raise RuntimeError("delivered_to ro'yxati noto'g'ri.")
+            raise RuntimeError(
+                "delivered_to ro'yxati noto'g'ri."
+            )
 
     return state
 
@@ -203,7 +214,9 @@ def load_state():
         raw = base64.b64decode(data["content"]).decode("utf-8")
         state = json.loads(raw)
     except (KeyError, ValueError, UnicodeDecodeError) as exc:
-        raise RuntimeError("GitHub state faylini o'qib bo'lmadi.") from exc
+        raise RuntimeError(
+            "GitHub state faylini o'qib bo'lmadi."
+        ) from exc
 
     return validate_state(state), data["sha"]
 
@@ -234,10 +247,15 @@ def save_state(state, sha):
     )
 
     response.raise_for_status()
-    new_sha = (response.json().get("content") or {}).get("sha")
+
+    new_sha = (
+        response.json().get("content") or {}
+    ).get("sha")
 
     if not new_sha:
-        raise RuntimeError("GitHub yangi state SHA qaytarmadi.")
+        raise RuntimeError(
+            "GitHub yangi state SHA qaytarmadi."
+        )
 
     return new_sha
 
@@ -251,7 +269,7 @@ def make_signal_key(result, candles_by_timeframe):
 
     timestamp = candles[-1].timestamp
 
-    # M15 va M15-CT alohida kalitga ega bo'ladi.
+    # MAIN va COUNTER-TREND mustaqil signal kalitlari.
     key = f"{signal.symbol}|{signal.timeframe}"
     signature = f"{timestamp}|{signal.side}"
 
@@ -262,18 +280,18 @@ def get_delivery_record(state, key, signature, users):
     old = state["signals"].get(key)
 
     if isinstance(old, dict) and old.get("signature") == signature:
-        delivered = old.get("delivered_to", [])
-
         delivered = {
             str(user).strip()
-            for user in delivered
+            for user in old.get("delivered_to", [])
             if str(user).strip()
         }
 
         return {
             "signature": signature,
             "target_users": list(users),
-            "delivered_to": sorted(delivered.intersection(set(users))),
+            "delivered_to": sorted(
+                delivered.intersection(set(users))
+            ),
         }
 
     return {
@@ -317,6 +335,9 @@ def format_signal(result):
         signal.reason or "Tasdiqlangan texnik shartlar"
     )
 
+    confidence = getattr(signal, "confidence", 0.0) or 0.0
+    strength = getattr(result, "strength", 0.0) or 0.0
+
     return (
         f"{emoji} <b>FOREX SIGNALS {VERSION}</b>\n"
         f"Signal turi: <b>{signal_type}</b>\n"
@@ -328,14 +349,14 @@ def format_signal(result):
         f"Stop Loss: <code>{format_price(signal.symbol, signal.stop_loss)}</code>\n"
         f"Take Profit: <code>{format_price(signal.symbol, signal.take_profit)}</code>\n"
         f"Risk/Reward: <b>{rr}</b>\n"
-        f"Texnik baho: <b>{signal.confidence:.2f}%</b>\n"
+        f"Texnik baho: <b>{confidence:.2f}%</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"MTF yo'nalishi: <b>{html.escape(str(result.trend))}</b>\n"
-        f"MTF mosligi: <b>{result.strength:.2f}%</b>\n"
+        f"MTF mosligi: <b>{strength:.2f}%</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"<b>Tasdiqlar:</b>\n{reason}\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"<i>V6 avtomatik tahlili. Foyda kafolati emas.</i>"
+        f"<i>V6 avtomatik tahlili. Bu foyda kafolati emas.</i>"
     )
 
 
@@ -363,7 +384,11 @@ def fetch_symbol_data(symbol):
     candles_by_timeframe = {}
 
     for timeframe in TIMEFRAMES:
-        logger.info("[DATA] %s %s yuklanmoqda", symbol, timeframe)
+        logger.info(
+            "[DATA] %s %s yuklanmoqda",
+            symbol,
+            timeframe,
+        )
 
         market = get_verified_market_data(
             symbol=symbol,
@@ -399,11 +424,13 @@ def fetch_symbol_data(symbol):
 
 def analyze_one_symbol(symbol):
     candles = fetch_symbol_data(symbol)
-    results = analyze_symbol(symbol, candles)
+    batch = analyze_symbol(symbol, candles)
+    results = list(batch)
 
     for result in results:
         logger.info(
-            "[V6 RESULT] %s | %s | %s | trend=%s | strength=%.2f%% | %s",
+            "[V6 RESULT] %s | %s | %s | trend=%s | "
+            "strength=%.2f%% | %s",
             symbol,
             result.signal.timeframe,
             result.signal.side,
@@ -415,12 +442,40 @@ def analyze_one_symbol(symbol):
     return results, candles
 
 
-def deliver_one_signal(result, candles, state, state_sha, users, stats):
+def _normalize_results(value):
+    """Eski bitta AnalysisResult va yangi ro'yxatni qabul qiladi."""
+
+    if hasattr(value, "signal"):
+        return [value]
+
+    if isinstance(value, (list, tuple)):
+        return list(value)
+
+    try:
+        return list(value)
+    except TypeError as exc:
+        raise RuntimeError(
+            "Signal engine noto'g'ri natija qaytardi."
+        ) from exc
+
+
+def deliver_one_signal(
+    result,
+    candles,
+    state,
+    state_sha,
+    users,
+    stats,
+):
     signal = result.signal
 
     if signal.side == "HOLD":
         stats["hold"] += 1
-        logger.info("[HOLD] %s | %s", signal.symbol, signal.reason)
+        logger.info(
+            "[HOLD] %s | %s",
+            signal.symbol,
+            signal.reason,
+        )
         return state_sha
 
     if signal.side == "BUY":
@@ -428,9 +483,14 @@ def deliver_one_signal(result, candles, state, state_sha, users, stats):
     elif signal.side == "SELL":
         stats["sell"] += 1
     else:
-        raise RuntimeError(f"Noma'lum signal: {signal.side}")
+        raise RuntimeError(
+            f"Noma'lum signal: {signal.side}"
+        )
 
-    key, signature = make_signal_key(result, candles)
+    key, signature = make_signal_key(
+        result,
+        candles,
+    )
 
     record = get_delivery_record(
         state,
@@ -440,7 +500,10 @@ def deliver_one_signal(result, candles, state, state_sha, users, stats):
     )
 
     if not TELEGRAM_ENABLED:
-        logger.info("[DRY RUN]\n%s", format_signal(result))
+        logger.info(
+            "[DRY RUN]\n%s",
+            format_signal(result),
+        )
         return state_sha
 
     pending = [
@@ -460,10 +523,15 @@ def deliver_one_signal(result, candles, state, state_sha, users, stats):
 
     for user in pending:
         try:
-            message = format_signal_for_user(result, user)
+            message = format_signal_for_user(
+                result,
+                user,
+            )
 
             if not send_telegram(user, message):
-                raise RuntimeError("Telegram yuborishni tasdiqlamadi.")
+                raise RuntimeError(
+                    "Telegram yuborishni tasdiqlamadi."
+                )
 
         except Exception:
             stats["delivery_failed"] += 1
@@ -476,11 +544,16 @@ def deliver_one_signal(result, candles, state, state_sha, users, stats):
             continue
 
         record["delivered_to"].append(user)
-        record["delivered_to"] = sorted(set(record["delivered_to"]))
+        record["delivered_to"] = sorted(
+            set(record["delivered_to"])
+        )
         state["signals"][key] = record
 
         try:
-            state_sha = save_state(state, state_sha)
+            state_sha = save_state(
+                state,
+                state_sha,
+            )
         except Exception as exc:
             logger.exception("[STATE SAVE ERROR]")
             raise StatePersistenceError(
@@ -489,6 +562,7 @@ def deliver_one_signal(result, candles, state, state_sha, users, stats):
             ) from exc
 
         stats["sent"] += 1
+
         logger.info(
             "[SENT] %s %s %s -> %s",
             signal.symbol,
@@ -519,7 +593,9 @@ def main():
         users = get_users()
 
         if not users:
-            raise RuntimeError("Tasdiqlangan foydalanuvchilar topilmadi.")
+            raise RuntimeError(
+                "Tasdiqlangan foydalanuvchilar topilmadi."
+            )
     else:
         state, state_sha = {"signals": {}}, None
         users = []
@@ -539,10 +615,11 @@ def main():
         logger.info("[SYMBOL START] %s", symbol)
 
         try:
-            results, candles = analyze_one_symbol(symbol)
+            raw_results, candles = analyze_one_symbol(symbol)
+            results = _normalize_results(raw_results)
+
             stats["analyzed"] += 1
 
-            # Bitta instrumentdan MAIN va COUNTER signallari alohida yuboriladi.
             for result in results:
                 state_sha = deliver_one_signal(
                     result,
@@ -558,15 +635,23 @@ def main():
 
         except Exception:
             stats["failed"] += 1
-            logger.exception("[SYMBOL ERROR] %s", symbol)
+            logger.exception(
+                "[SYMBOL ERROR] %s",
+                symbol,
+            )
 
     if len(state["signals"]) > MAX_STORED_SIGNALS:
         state["signals"] = dict(
-            list(state["signals"].items())[-MAX_STORED_SIGNALS:]
+            list(state["signals"].items())[
+                -MAX_STORED_SIGNALS:
+            ]
         )
 
         if TELEGRAM_ENABLED:
-            state_sha = save_state(state, state_sha)
+            state_sha = save_state(
+                state,
+                state_sha,
+            )
 
     logger.info("=" * 60)
     logger.info("V6 YAKUNIY NATIJA: %s", stats)
@@ -578,6 +663,9 @@ def main():
 if __name__ == "__main__":
     final_stats = main()
 
-    if final_stats["failed"] or final_stats["delivery_failed"]:
+    if (
+        final_stats["failed"]
+        or final_stats["delivery_failed"]
+    ):
         logger.error("V6 xatoliklar bilan yakunlandi.")
         sys.exit(1)
