@@ -18,9 +18,12 @@ STOP_ATR_MULTIPLIER = 1.5
 RECENT_STRUCTURE_CANDLES = 12
 RECENT_LIQUIDITY_CANDLES = 3
 
-# MACD momentum sozlamalari
+# MACD momentum
 MACD_MOMENTUM_BARS = 4
-MACD_MOMENTUM_CHANGE_THRESHOLD = 0.15
+MACD_MOMENTUM_CHANGE_THRESHOLD = 0.12
+
+# M15 tasdiqlari: 5 ta mezondan kamida 3 tasi
+MINIMUM_ENTRY_CONFIRMATIONS = 3
 
 
 def _last_valid(values) -> Optional[float]:
@@ -46,12 +49,10 @@ def _hold_result(
     strength=0.0,
     reasons=None,
 ):
-    signal = _hold_signal(symbol, reason)
-
     return AnalysisResult(
         symbol=symbol,
         timeframe="M15",
-        signal=signal,
+        signal=_hold_signal(symbol, reason),
         trend=trend,
         strength=strength,
         reasons=tuple(reasons or (reason,)),
@@ -59,7 +60,6 @@ def _hold_result(
 
 
 def _macd_values(macd_data):
-    """MACD, signal va histogram qiymatlarini vaqt bo'yicha juftlaydi."""
     if not isinstance(macd_data, dict):
         return []
 
@@ -90,32 +90,18 @@ def _macd_values(macd_data):
             continue
 
         try:
-            main = float(main)
-            signal = float(signal)
-            histogram = float(histogram)
+            rows.append((
+                float(main),
+                float(signal),
+                float(histogram),
+            ))
         except (TypeError, ValueError):
             continue
-
-        rows.append((main, signal, histogram))
 
     return rows
 
 
 def _analyze_macd_momentum(macd_data, direction):
-    """
-    MACD yo'nalishi va momentumini baholaydi.
-
-    Qarama-qarshi MACD susayishi uchun:
-    - kamida 4 ta to'liq qiymat;
-    - oxirgi 2 shamning o'rtacha histogramma moduli
-      oldingi 2 shamnikidan kamida 15% past;
-    - oxirgi histogramma moduli avvalgisidan ham past bo'lishi kerak.
-
-    Kuchayish uchun shu shartlarning teskari holati talab qilinadi.
-
-    Kichik farqlar yoki qarama-qarshi belgilar UNCLEAR bo'lib qoladi.
-    """
-
     rows = _macd_values(macd_data)
 
     if not rows:
@@ -136,7 +122,7 @@ def _analyze_macd_momentum(macd_data, direction):
     if len(rows) < MACD_MOMENTUM_BARS:
         return (
             "OPPOSING_UNCLEAR",
-            "MACD qarama-qarshi, momentum uchun 4 ta qiymat yetarli emas",
+            "MACD qarama-qarshi, momentum uchun qiymatlar yetarli emas",
         )
 
     magnitudes = [
@@ -166,8 +152,6 @@ def _analyze_macd_momentum(macd_data, direction):
     last_bar_weakening = magnitudes[-1] < magnitudes[-2]
     last_bar_strengthening = magnitudes[-1] > magnitudes[-2]
 
-    # Haqiqiy susayish: o'rtacha momentum kamida 15% pasayishi
-    # va oxirgi shamda ham pasayish davom etishi kerak.
     if (
         recent_average <= weakening_limit
         and last_bar_weakening
@@ -180,14 +164,9 @@ def _analyze_macd_momentum(macd_data, direction):
 
         return (
             "OPPOSING_WEAKENING",
-            (
-                "MACD qarama-qarshi, momentum "
-                f"{change_percent:.1f}% susaymoqda"
-            ),
+            f"MACD qarama-qarshi, momentum {change_percent:.1f}% susaymoqda",
         )
 
-    # Haqiqiy kuchayish: o'rtacha momentum kamida 15% oshishi
-    # va oxirgi shamda ham o'sish davom etishi kerak.
     if (
         recent_average >= strengthening_limit
         and last_bar_strengthening
@@ -200,10 +179,7 @@ def _analyze_macd_momentum(macd_data, direction):
 
         return (
             "OPPOSING_STRENGTHENING",
-            (
-                "MACD qarama-qarshi va momentum "
-                f"{change_percent:.1f}% kuchaymoqda"
-            ),
+            f"MACD qarama-qarshi va momentum {change_percent:.1f}% kuchaymoqda",
         )
 
     return (
@@ -213,7 +189,6 @@ def _analyze_macd_momentum(macd_data, direction):
 
 
 def _get_macd_direction(macd_data):
-    """Eski chaqiruvlar bilan moslik uchun yordamchi funksiya."""
     rows = _macd_values(macd_data)
 
     if not rows:
@@ -231,37 +206,36 @@ def _get_macd_direction(macd_data):
 
 
 def _check_m30_momentum(direction, m30_indicators):
-    """M30 MACD qarama-qarshi kuchayishini tekshiradi."""
-
     if not m30_indicators:
-        return False, ["M30 MACD ma'lumotlari mavjud emas"]
+        return True, ["M30 MACD momentum mavjud emas — neytral"]
 
     macd_data = m30_indicators.get("macd")
 
     if not isinstance(macd_data, dict):
-        return False, ["M30 MACD ma'lumotlari noto'g'ri"]
+        return True, ["M30 MACD ma'lumotlari to'liq emas — neytral"]
 
     state, message = _analyze_macd_momentum(
         macd_data,
         direction,
     )
 
-    if state == "UNKNOWN":
-        return False, ["M30 MACD ma'lumotlari mavjud emas"]
-
-    if state in (
-        "OPPOSING_STRENGTHENING",
-        "OPPOSING_UNCLEAR",
-    ):
+    # Faqat qarama-qarshi momentum aniq kuchayayotgan bo'lsa bloklash.
+    if state == "OPPOSING_STRENGTHENING":
         return False, [f"M30: {message}"]
 
     if state == "OPPOSING_WEAKENING":
         return True, [f"M30: {message}"]
 
+    if state == "OPPOSING_UNCLEAR":
+        return True, [f"M30: {message} — qo'shimcha kuzatuv"]
+
     if state == "ALIGNED":
         return True, ["M30 MACD asosiy yo'nalishni tasdiqladi"]
 
-    return True, ["M30 MACD neytral — qabul qilindi"]
+    if state == "UNKNOWN":
+        return True, ["M30 MACD noma'lum — neytral"]
+
+    return True, ["M30 MACD neytral"]
 
 
 def _check_direction(
@@ -271,10 +245,8 @@ def _check_direction(
     m15_candles,
     m30_indicators=None,
 ):
-    """M15 filtrlarini va M30 momentumini tekshiradi."""
-
-    failures = []
     confirmations = []
+    observations = []
 
     if direction not in ("BULLISH", "BEARISH"):
         return False, ["No clear market direction"]
@@ -283,105 +255,81 @@ def _check_direction(
         1 if direction == "BULLISH" else -1
     )
 
+    # 1. Supertrend
     supertrend_direction = _last_valid(
         m15_indicators["supertrend"]["direction"]
     )
 
-    rsi_value = _last_valid(
-        m15_indicators["rsi_14"]
-    )
+    if supertrend_direction == expected_supertrend:
+        confirmations.append("M15 Supertrend confirmed")
+    else:
+        observations.append("M15 Supertrend yo'nalishni tasdiqlamadi")
 
+    # 2. RSI
+    rsi_value = _last_valid(m15_indicators["rsi_14"])
+
+    if rsi_value is None:
+        observations.append("RSI ma'lumotlari mavjud emas")
+
+    elif direction == "BULLISH":
+        if 48.0 < rsi_value < 78.0:
+            confirmations.append(
+                f"RSI BUY confirmation: {rsi_value:.2f}"
+            )
+        else:
+            observations.append(
+                f"RSI BUY uchun mos emas: {rsi_value:.2f}"
+            )
+
+    else:
+        if 22.0 < rsi_value < 52.0:
+            confirmations.append(
+                f"RSI SELL confirmation: {rsi_value:.2f}"
+            )
+        else:
+            observations.append(
+                f"RSI SELL uchun mos emas: {rsi_value:.2f}"
+            )
+
+    # 3. ADX
     adx_value = _last_valid(
         m15_indicators["adx"]["adx"]
     )
 
-    # 1. M15 Supertrend
-    if supertrend_direction != expected_supertrend:
-        failures.append(
-            "M15 Supertrend does not confirm direction"
-        )
-    else:
-        confirmations.append("M15 Supertrend confirmed")
-
-    # 2. RSI
-    if rsi_value is None:
-        failures.append("RSI data unavailable")
-    elif direction == "BULLISH":
-        if not 50.0 < rsi_value < 75.0:
-            failures.append("RSI does not confirm BUY")
-        else:
-            confirmations.append(
-                f"RSI confirmation: {rsi_value:.2f}"
-            )
-    else:
-        if not 25.0 < rsi_value < 50.0:
-            failures.append("RSI does not confirm SELL")
-        else:
-            confirmations.append(
-                f"RSI confirmation: {rsi_value:.2f}"
-            )
-
-    # 3. ADX
-    if adx_value is None or adx_value < MINIMUM_ADX:
-        value_text = (
-            "unavailable"
-            if adx_value is None
-            else f"{adx_value:.2f}"
-        )
-
-        failures.append(
-            f"ADX trend strength is insufficient "
-            f"(M15 ADX={value_text}, minimum={MINIMUM_ADX:.2f})"
-        )
-    else:
+    if adx_value is not None and adx_value >= MINIMUM_ADX:
         confirmations.append(
             f"ADX confirmation: {adx_value:.2f}"
         )
+    else:
+        observations.append(
+            f"ADX yetarli emas: {adx_value}"
+        )
 
-    # 4. M15 MACD momentum
+    # 4. M15 MACD
     macd_state, macd_message = _analyze_macd_momentum(
         m15_indicators["macd"],
         direction,
     )
 
-    if macd_state == "UNKNOWN":
-        failures.append("MACD data unavailable")
-
-    elif macd_state in (
-        "OPPOSING_STRENGTHENING",
-        "OPPOSING_UNCLEAR",
-    ):
-        failures.append(macd_message)
-
-    elif macd_state in (
-        "OPPOSING_WEAKENING",
-        "ALIGNED",
-    ):
+    if macd_state in ("ALIGNED", "OPPOSING_WEAKENING"):
         confirmations.append(macd_message)
 
-    else:
-        confirmations.append("MACD neutral — accepted")
-
-    # 5. M30 MACD momentum.
-    # M30 trend tasdig'i analyze_mtf ichida majburiy qoladi.
-    if m30_indicators is not None:
-        m30_ok, m30_reasons = _check_m30_momentum(
-            direction,
-            m30_indicators,
+    elif macd_state == "OPPOSING_STRENGTHENING":
+        observations.append(
+            f"MACD qarama-qarshi kuchaymoqda: {macd_message}"
         )
 
-        if not m30_ok:
-            failures.extend(m30_reasons)
-        else:
-            confirmations.extend(m30_reasons)
+    else:
+        observations.append(macd_message)
 
-    # 6. Market structure / BOS-CHOCH
+    # 5. Market structure / BOS / CHOCH
     structure_trend = structure["trend"]
 
     if structure_trend == direction:
         confirmations.append(
             "Market structure trend confirmed"
         )
+
     else:
         recent_timestamps = {
             candle.timestamp
@@ -397,17 +345,28 @@ def _check_direction(
             )
         ]
 
-        if not recent_events:
-            failures.append(
-                "No matching BOS/CHOCH in last "
-                f"{RECENT_STRUCTURE_CANDLES} M15 candles"
-            )
-        else:
+        if recent_events:
             confirmations.append(
                 "Recent BOS/CHOCH confirmed"
             )
+        else:
+            observations.append(
+                "So'nggi M15 shamlarida mos BOS/CHOCH topilmadi"
+            )
 
-    # 7. Liquidity sweep — qo'shimcha tasdiq, majburiy emas.
+    # M30 MACD: faqat aniq qarama-qarshi kuchayish bloklaydi.
+    if m30_indicators is not None:
+        m30_ok, m30_reasons = _check_m30_momentum(
+            direction,
+            m30_indicators,
+        )
+
+        if not m30_ok:
+            return False, m30_reasons
+
+        confirmations.extend(m30_reasons)
+
+    # Likvidlik sweep — qo'shimcha tasdiq.
     recent_sweep_timestamps = {
         candle.timestamp
         for candle in m15_candles[-RECENT_LIQUIDITY_CANDLES:]
@@ -427,10 +386,18 @@ def _check_direction(
             "Recent liquidity sweep confirmed"
         )
 
-    if failures:
-        return False, failures
+    if len([
+        item for item in confirmations
+        if not item.startswith("M30 ")
+    ]) < MINIMUM_ENTRY_CONFIRMATIONS:
+        return False, [
+            f"M15 tasdiqlari yetarli emas: "
+            f"{len([item for item in confirmations if not item.startswith('M30 ')])}/"
+            f"{MINIMUM_ENTRY_CONFIRMATIONS}",
+            *observations,
+        ]
 
-    return True, confirmations
+    return True, confirmations + observations
 
 
 def analyze_symbol(
@@ -438,7 +405,7 @@ def analyze_symbol(
     candles_by_timeframe: dict[str, list[Candle]],
 ) -> AnalysisResult:
 
-    # 1. Ma'lumotlarni tekshirish
+    # 1. Ma'lumotlar validatsiyasi
     for timeframe in TIMEFRAMES:
         candles = candles_by_timeframe.get(timeframe, [])
 
@@ -458,7 +425,7 @@ def analyze_symbol(
                 reason=reason,
             )
 
-    # 2. MTF tahlil
+    # 2. Multi-timeframe tahlil
     mtf = analyze_mtf(candles_by_timeframe)
 
     overall_trend = mtf["overall_trend"]
@@ -476,23 +443,32 @@ def analyze_symbol(
 
     if alignment < MINIMUM_ALIGNMENT:
         blockers.append(
-            f"MTF alignment too low: "
-            f"{alignment:.2f}% "
+            f"MTF alignment too low: {alignment:.2f}% "
             f"(minimum {MINIMUM_ALIGNMENT:.2f}%)"
         )
 
+    # Yuqori timeframe'lardan kamida ikkitasi mos bo'lishi shart.
     if not mtf["higher_confirmation"]:
         blockers.append(
-            "D1, H4 and H1 do not fully agree"
+            "D1, H4 and H1 higher timeframe confirmation insufficient"
         )
 
-    # M30 trend tasdig'i majburiy.
+    # M30 trend tasdig'i saqlanadi.
     if not mtf["lower_confirmation"]:
         blockers.append(
-            "M30 does not confirm the higher-timeframe direction"
+            "M30 trend does not confirm higher-timeframe direction"
         )
 
-    # 3. M15 va M30 indikatorlari hamda M15 struktura
+    if blockers:
+        return _hold_result(
+            symbol,
+            "; ".join(blockers),
+            trend=overall_trend,
+            strength=alignment,
+            reasons=tuple(blockers),
+        )
+
+    # 3. Indikatorlar
     m15_candles = candles_by_timeframe["M15"]
     m30_candles = candles_by_timeframe["M30"]
 
@@ -504,7 +480,7 @@ def analyze_symbol(
     direction = overall_trend
     side = "BUY" if direction == "BULLISH" else "SELL"
 
-    # 4. M15 filtrlarini tekshirish
+    # 4. Kirish tasdiqlari
     confirmed, confirmation_reasons = _check_direction(
         direction=direction,
         m15_indicators=indicators,
@@ -514,20 +490,15 @@ def analyze_symbol(
     )
 
     if not confirmed:
-        blockers.extend(confirmation_reasons)
-
-    if blockers:
-        reason = "; ".join(blockers)
-
         return _hold_result(
             symbol,
-            reason,
+            "; ".join(confirmation_reasons),
             trend=overall_trend,
             strength=alignment,
-            reasons=tuple(blockers),
+            reasons=tuple(confirmation_reasons),
         )
 
-    # 5. Entry, SL va TP — formulalar o'zgarmagan
+    # 5. Entry, SL va TP
     latest_candle = m15_candles[-1]
     entry = latest_candle.close
 
@@ -550,7 +521,7 @@ def analyze_symbol(
         stop_loss = entry + stop_distance
         take_profit = entry - stop_distance * MINIMUM_RR
 
-    # 6. Savdo tekshiruvi
+    # 6. Savdo validatsiyasi
     validation = validate_trade(
         side=side,
         entry=entry,
@@ -561,17 +532,15 @@ def analyze_symbol(
     )
 
     if not validation.valid:
-        reason = "; ".join(validation.reasons)
-
         return _hold_result(
             symbol,
-            reason,
+            "; ".join(validation.reasons),
             trend=overall_trend,
             strength=alignment,
             reasons=tuple(validation.reasons),
         )
 
-    # 7. Ishonchlilik hisoblash formulasi o'zgarmagan
+    # 7. Ishonchlilik
     adx_for_confidence = (
         _last_valid(indicators["adx"]["adx"]) or 0.0
     )
