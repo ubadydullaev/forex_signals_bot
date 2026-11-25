@@ -21,8 +21,8 @@ def _get_providers(symbol):
         ]
 
     providers = [
-        ("LSE", data_adapter._fetch_lse),
         ("ForexSB", data_adapter._fetch_forexsb),
+        ("LSE", data_adapter._fetch_lse),
         ("Dukascopy", data_adapter._fetch_dukascopy),
     ]
 
@@ -45,31 +45,20 @@ def _gap_age_days(gap, now_ms):
     gap_end = int(gap.get("to", 0))
     if gap_end <= 0:
         return -1
-
     return (now_ms - gap_end) / 86_400_000
 
 
 def _is_tolerable_old_gap(gap, timeframe, source, now_ms):
-    """
-    Faqat ForexSB tarixidagi alohida bitta shamlik eski uzilishga ruxsat.
-    Yangi uzilishlar va ketma-ket bir nechta yo'qolgan shamlar rad etiladi.
-    """
     if source != "forexsb":
         return False
 
     if gap.get("missing_intervals") != 1:
         return False
 
-    age_days = _gap_age_days(gap, now_ms)
-    if age_days <= OLD_GAP_AGE_DAYS:
+    if _gap_age_days(gap, now_ms) <= OLD_GAP_AGE_DAYS:
         return False
 
-    # D1 uchun tekshiruv _inspect_candle_gaps tomonidan savdo kunlari
-    # hisobida tuzilgan. H4 va boshqa TF uchun bitta interval tekshiriladi.
-    if timeframe not in ("M15", "M30", "H1", "H4", "D1"):
-        return False
-
-    return True
+    return timeframe in ("M15", "M30", "H1", "H4", "D1")
 
 
 def _validate_history(symbol, timeframe, candles, requested_limit):
@@ -131,17 +120,15 @@ def _validate_history(symbol, timeframe, candles, requested_limit):
         )
 
     duration_ms = data_adapter.TIMEFRAME_SETTINGS[timeframe]["duration_ms"]
-
     last_candle = candles[-1]
     last_close_time = last_candle.timestamp + duration_ms
+
     age_ms = max(0, now_ms - last_close_time)
     age_hours = age_ms / 3_600_000
 
     if symbol in data_adapter.BINANCE_SYMBOLS:
-        # Kripto 24/7 ishlaydi: oxirgi yopilgan sham yangiligi qat'iy tekshiriladi.
         max_age_ms = max(2 * duration_ms, 30 * 60 * 1000)
     else:
-        # Forex/metallarda sessiya va dam olish kunlari hisobga olinadi.
         max_age_ms = MAX_FX_DATA_AGE_HOURS * 3_600_000
 
     if age_ms > max_age_ms:
@@ -164,8 +151,8 @@ def _validate_history(symbol, timeframe, candles, requested_limit):
 
     if symbol in data_adapter.BINANCE_SYMBOLS:
         logger.warning(
-            "[CRYPTO FEED NOTE] %s Binance Spot %s juftligidan olinmoqda. "
-            "Bu broker CFD kotirovkasi bilan aynan bir xil bo'lmasligi mumkin.",
+            "[CRYPTO FEED NOTE] %s Binance Spot %s. "
+            "Broker CFD kotirovkasi bilan farq qilishi mumkin.",
             symbol,
             data_adapter.BINANCE_SYMBOLS[symbol],
         )
@@ -233,6 +220,7 @@ def get_verified_market_data(
 
         except Exception as error:
             errors[provider_name] = str(error)
+
             logger.warning(
                 "[DATA SOURCE REJECTED] %s %s | %s | %s",
                 symbol,
