@@ -1,3 +1,4 @@
+
 import logging
 import warnings
 from datetime import datetime, timezone
@@ -20,18 +21,17 @@ def _get_providers(symbol):
         ]
 
     providers = [
-        ("LSE", data_adapter._fetch_lse),
-        ("ForexSB", data_adapter._fetch_forexsb),
         ("Dukascopy", data_adapter._fetch_dukascopy),
+        ("ForexSB", data_adapter._fetch_forexsb),
     ]
 
     if symbol in data_adapter.TWELVE_DATA_SYMBOLS:
         providers.append(
-            (
-                "Twelve Data",
-                data_adapter._fetch_twelve_data_with_cache,
-            )
+            ("Twelve Data", data_adapter._fetch_twelve_data_with_cache)
         )
+
+    # LSE oxirgi zaxira: kunlik limit xatolari asosiy tahlilni sekinlashtirmasin.
+    providers.append(("LSE", data_adapter._fetch_lse))
 
     return providers
 
@@ -45,19 +45,12 @@ def _format_time(timestamp):
 
 def _gap_age_days(gap, now_ms):
     gap_end = int(gap.get("to", 0))
-
     if gap_end <= 0:
         return -1
-
     return (now_ms - gap_end) / 86_400_000
 
 
-def _is_tolerable_old_gap(
-    gap,
-    timeframe,
-    source,
-    now_ms,
-):
+def _is_tolerable_old_gap(gap, timeframe, source, now_ms):
     if source != "forexsb":
         return False
 
@@ -67,89 +60,52 @@ def _is_tolerable_old_gap(
     if _gap_age_days(gap, now_ms) <= OLD_GAP_AGE_DAYS:
         return False
 
-    return timeframe in (
-        "M15",
-        "M30",
-        "H1",
-        "H4",
-        "D1",
-    )
+    return timeframe in ("M15", "M30", "H1", "H4", "D1")
 
 
-def _validate_history(
-    symbol,
-    timeframe,
-    candles,
-    requested_limit,
-):
+def _validate_history(symbol, timeframe, candles, requested_limit):
     if not isinstance(candles, list):
-        raise RuntimeError(
-            "Manba candle ro'yxatini qaytarmadi"
-        )
+        raise RuntimeError("Manba candle ro'yxatini qaytarmadi")
 
     if len(candles) < requested_limit:
         raise RuntimeError(
-            f"Tarix yetarli emas: "
-            f"{len(candles)}/{requested_limit} sham"
+            f"Tarix yetarli emas: {len(candles)}/{requested_limit} sham"
         )
 
     if not all(candle.is_closed for candle in candles):
-        raise RuntimeError(
-            "Yopilmagan sham aniqlandi"
-        )
+        raise RuntimeError("Yopilmagan sham aniqlandi")
 
-    sources = {
-        candle.source for candle in candles
-    }
-
+    sources = {candle.source for candle in candles}
     if len(sources) != 1:
         raise RuntimeError(
-            "Bir timeframe ichida turli manbalar "
-            f"aralashgan: {sources}"
+            f"Bir timeframe ichida turli manbalar aralashgan: {sources}"
         )
 
-    for previous, current in zip(
-        candles,
-        candles[1:],
-    ):
+    for previous, current in zip(candles, candles[1:]):
         if current.timestamp <= previous.timestamp:
-            raise RuntimeError(
-                "Shamlar vaqti tartibsiz yoki takrorlangan"
-            )
+            raise RuntimeError("Shamlar vaqti tartibsiz yoki takrorlangan")
 
     source = candles[-1].source
-    now_ms = int(
-        datetime.now(timezone.utc).timestamp() * 1000
-    )
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
 
     with warnings.catch_warnings(record=True):
         warnings.simplefilter("always")
-
         gaps = data_adapter._inspect_candle_gaps(
-            candles,
-            timeframe,
-            source,
-            symbol,
+            candles, timeframe, source, symbol
         )
 
     accepted_gaps = []
     rejected_gaps = []
 
     for gap in gaps:
-        if _is_tolerable_old_gap(
-            gap,
-            timeframe,
-            source,
-            now_ms,
-        ):
+        if _is_tolerable_old_gap(gap, timeframe, source, now_ms):
             accepted_gaps.append(gap)
         else:
             rejected_gaps.append(gap)
 
     for gap in accepted_gaps:
         logger.warning(
-            "[OLD ISOLATED GAP ACCEPTED] %s %s | "
-            "age_days=%.1f | gap=%s",
+            "[OLD ISOLATED GAP ACCEPTED] %s %s | age_days=%.1f | gap=%s",
             symbol,
             timeframe,
             _gap_age_days(gap, now_ms),
@@ -158,45 +114,30 @@ def _validate_history(
 
     if rejected_gaps:
         raise RuntimeError(
-            f"Kutilmagan sham uzilishi: "
-            f"{len(rejected_gaps)} ta. "
+            f"Kutilmagan sham uzilishi: {len(rejected_gaps)} ta. "
             f"Birinchi uzilishlar: {rejected_gaps[:3]}"
         )
 
-    duration_ms = (
-        data_adapter.TIMEFRAME_SETTINGS[timeframe][
-            "duration_ms"
-        ]
-    )
-
+    duration_ms = data_adapter.TIMEFRAME_SETTINGS[timeframe]["duration_ms"]
     last_candle = candles[-1]
-    last_close_time = (
-        last_candle.timestamp + duration_ms
-    )
+    last_close_time = last_candle.timestamp + duration_ms
 
     age_ms = max(0, now_ms - last_close_time)
     age_hours = age_ms / 3_600_000
 
     if symbol in data_adapter.BINANCE_SYMBOLS:
-        max_age_ms = max(
-            2 * duration_ms,
-            30 * 60 * 1000,
-        )
+        max_age_ms = max(2 * duration_ms, 30 * 60 * 1000)
     else:
-        max_age_ms = (
-            MAX_FX_DATA_AGE_HOURS * 3_600_000
-        )
+        max_age_ms = MAX_FX_DATA_AGE_HOURS * 3_600_000
 
     if age_ms > max_age_ms:
         raise RuntimeError(
-            f"Eskirgan ma'lumot: oxirgi sham yoshi "
-            f"{age_hours:.2f} soat"
+            f"Eskirgan ma'lumot: oxirgi sham yoshi {age_hours:.2f} soat"
         )
 
     logger.info(
-        "[DATA QUALITY PASS] %s %s | candles=%s | "
-        "source=%s | first=%s | last=%s | "
-        "age_hours=%.2f | accepted_old_gaps=%s",
+        "[DATA QUALITY PASS] %s %s | candles=%s | source=%s | "
+        "first=%s | last=%s | age_hours=%.2f | accepted_old_gaps=%s",
         symbol,
         timeframe,
         len(candles),
@@ -223,25 +164,17 @@ def get_verified_market_data(
 ):
     if limit < MINIMUM_HISTORY:
         raise ValueError(
-            f"V6 uchun kamida {MINIMUM_HISTORY} "
-            "ta sham talab qilinadi"
+            f"V6 uchun kamida {MINIMUM_HISTORY} ta sham talab qilinadi"
         )
 
-    data_adapter._validate_request(
-        symbol,
-        timeframe,
-        limit,
-    )
+    data_adapter._validate_request(symbol, timeframe, limit)
 
     errors = {}
 
-    for provider_name, provider_function in _get_providers(
-        symbol
-    ):
+    for provider_name, provider_function in _get_providers(symbol):
         try:
             logger.info(
-                "[DATA SOURCE TRY] %s %s | "
-                "provider=%s | requested=%s",
+                "[DATA SOURCE TRY] %s %s | provider=%s | requested=%s",
                 symbol,
                 timeframe,
                 provider_name,
@@ -250,12 +183,7 @@ def get_verified_market_data(
 
             with warnings.catch_warnings(record=True) as captured:
                 warnings.simplefilter("always")
-
-                candles = provider_function(
-                    symbol,
-                    timeframe,
-                    limit,
-                )
+                candles = provider_function(symbol, timeframe, limit)
 
             for warning in captured:
                 logger.warning(
@@ -265,12 +193,7 @@ def get_verified_market_data(
                     warning.message,
                 )
 
-            _validate_history(
-                symbol,
-                timeframe,
-                candles,
-                limit,
-            )
+            _validate_history(symbol, timeframe, candles, limit)
 
             logger.info(
                 "[DATA SOURCE SELECTED] %s %s | %s",
@@ -287,7 +210,6 @@ def get_verified_market_data(
 
         except Exception as error:
             errors[provider_name] = str(error)
-
             logger.warning(
                 "[DATA SOURCE REJECTED] %s %s | %s | %s",
                 symbol,
@@ -297,11 +219,10 @@ def get_verified_market_data(
             )
 
     details = " | ".join(
-        f"{name}: {message}"
-        for name, message in errors.items()
+        f"{name}: {message}" for name, message in errors.items()
     )
 
     raise RuntimeError(
-        f"{symbol} {timeframe}: {limit} ta sifatli "
-        f"sham topilmadi. {details}"
+        f"{symbol} {timeframe}: {limit} ta sifatli sham topilmadi. "
+        f"{details}"
     )
