@@ -13,8 +13,8 @@ MINIMUM_CANDLES = 200
 MINIMUM_ALIGNMENT = 80.0
 MINIMUM_ADX = 15.0
 
-# Qisqa muddatli setup uchun alohida ADX talabi.
 SHORT_TERM_MINIMUM_ADX = 18.0
+SHORT_TERM_MINIMUM_CONFIRMATIONS = 2
 
 MINIMUM_RR = 1.5
 STOP_ATR_MULTIPLIER = 1.5
@@ -415,36 +415,176 @@ def _build_trade_result(
     return result, reasons
 
 
-def _try_short_term_signal(
+def _ema_direction(indicators):
+    ema20 = _last_valid(indicators.get("ema_20"))
+    ema50 = _last_valid(indicators.get("ema_50"))
+
+    if ema20 is None or ema50 is None:
+        return "UNKNOWN"
+
+    if ema20 > ema50:
+        return "BULLISH"
+
+    if ema20 < ema50:
+        return "BEARISH"
+
+    return "UNKNOWN"
+
+
+def _build_short_term_result(
     symbol,
+    direction,
     m15,
     m30,
-    m30_indicators,
     overall,
 ):
-    m15_trend = analyze_single_timeframe(m15, "M15")
-    m30_trend = analyze_single_timeframe(m30, "M30")
+    m15_indicators = calculate_indicators(m15)
+    m30_indicators = calculate_indicators(m30)
 
-    local_direction = m15_trend.get("trend")
+    m15_adx = _last_valid(m15_indicators.get("adx", {}).get("adx"))
+    m30_adx = _last_valid(m30_indicators.get("adx", {}).get("adx"))
 
-    if local_direction not in ("BULLISH", "BEARISH"):
-        return None
+    diagnostics = []
 
-    if m30_trend.get("trend") != local_direction:
-        return None
+    if m15_adx is None or m15_adx < SHORT_TERM_MINIMUM_ADX:
+        diagnostics.append(f"M15 ADX past: {m15_adx}")
+        return None, diagnostics
 
-    m15_adx = m15_trend.get("adx") or 0
-    m30_adx = m30_trend.get("adx") or 0
+    if m30_adx is None or m30_adx < SHORT_TERM_MINIMUM_ADX:
+        diagnostics.append(f"M30 ADX past: {m30_adx}")
+        return None, diagnostics
 
-    if m15_adx < SHORT_TERM_MINIMUM_ADX:
-        return None
+    m15_direction = _ema_direction(m15_indicators)
+    m30_direction = _ema_direction(m30_indicators)
 
-    if m30_adx < SHORT_TERM_MINIMUM_ADX:
-        return None
+    if m15_direction != direction or m30_direction != direction:
+        diagnostics.append(
+            f"EMA yo'nalish mos emas: M15={m15_direction}, "
+            f"M30={m30_direction}, kutilgan={direction}"
+        )
+        return None, diagnostics
 
-    local_strength = min(
-        m15_trend.get("strength") or 0,
-        m30_trend.get("strength") or 0,
+    confirmations = []
+    observations = []
+    blockers = []
+
+    # 1. M15 Supertrend.
+    expected = 1 if direction == "BULLISH" else -1
+    m15_st = _last_valid(
+        m15_indicators.get("supertrend", {}).get("direction")
+    )
+
+    if m15_st == expected:
+        confirmations.append("M15 Supertrend tasdiqladi")
+    else:
+        observations.append("M15 Supertrend yo'nalishni tasdiqlamadi")
+
+    # 2. RSI: qisqa muddatli momentum uchun kengroq diapazon.
+    rsi = _last_valid(m15_indicators.get("rsi_14"))
+
+    if rsi is None:
+        blockers.append("M15 RSI mavjud emas")
+    elif direction == "BULLISH" and 45 <= rsi <= 80:
+        confirmations.append(f"M15 RSI BUY momentum: {rsi:.2f}")
+    elif direction == "BEARISH" and 20 <= rsi <= 55:
+        confirmations.append(f"M15 RSI SELL momentum: {rsi:.2f}")
+    else:
+        blockers.append(f"M15 RSI momentum mos emas: {rsi:.2f}")
+
+    # 3. M15 MACD.
+    m15_macd_state, m15_macd_message = _analyze_macd_momentum(
+        m15_indicators.get("macd"),
+        direction,
+    )
+
+    if m15_macd_state == "OPPOSING_STRENGTHENING":
+        blockers.append(f"M15 {m15_macd_message}")
+    elif m15_macd_state == "ALIGNED":
+        confirmations.append("M15 MACD yo'nalishni tasdiqladi")
+    elif m15_macd_state == "OPPOSING_WEAKENING":
+        confirmations.append(m15_macd_message)
+    else:
+        observations.append(f"M15 {m15_macd_message}")
+
+    # 4. M30 MACD: kuchayib borayotgan qarama-qarshi momentum bloklaydi.
+    m30_macd_state, m30_macd_message = _analyze_macd_momentum(
+        m30_indicators.get("macd"),
+        direction,
+    )
+
+    if m30_macd_state == "OPPOSING_STRENGTHENING":
+        blockers.append(f"M30 {m30_macd_message}")
+    elif m30_macd_state == "ALIGNED":
+        confirmations.append("M30 MACD yo'nalishni tasdiqladi")
+    else:
+        observations.append(f"M30 {m30_macd_message}")
+
+    # 5. Market structure: trend yoki yaqinda yuz bergan BOS/CHOCH.
+    structure = analyze_market_structure(m15)
+    structure_trend = structure.get("trend", "UNKNOWN")
+
+    if structure_trend == direction:
+        confirmations.append("M15 market structure tasdiqladi")
+    else:
+        recent_timestamps = {
+            candle.timestamp
+            for candle in m15[-RECENT_STRUCTURE_CANDLES:]
+        }
+
+        recent_events = [
+            event for event in structure.get("events", [])
+            if event.timestamp in recent_timestamps
+            and event.direction == direction
+        ]
+
+        if recent_events:
+            confirmations.append("M15 yaqinda BOS/CHOCH tasdiqladi")
+        else:
+            observations.append("M15 yangi BOS/CHOCH topilmadi")
+
+    # RSI va kuchli qarama-qarshi MACD majburiy xavfsizlik tekshiruvlari.
+    if blockers:
+        return None, blockers + confirmations + observations
+
+    if len(confirmations) < SHORT_TERM_MINIMUM_CONFIRMATIONS:
+        diagnostics.append(
+            f"Qisqa signal tasdiqlari yetarli emas: "
+            f"{len(confirmations)}/{SHORT_TERM_MINIMUM_CONFIRMATIONS}"
+        )
+        return None, diagnostics + confirmations + observations
+
+    entry = m15[-1].close
+    atr = _last_valid(m15_indicators.get("atr_14"))
+
+    if atr is None or atr <= 0:
+        return None, ["M15 ATR mavjud emas yoki noto'g'ri"]
+
+    side = "BUY" if direction == "BULLISH" else "SELL"
+    distance = atr * STOP_ATR_MULTIPLIER
+
+    if side == "BUY":
+        stop_loss = entry - distance
+        take_profit = entry + distance * MINIMUM_RR
+    else:
+        stop_loss = entry + distance
+        take_profit = entry - distance * MINIMUM_RR
+
+    validation = validate_trade(
+        side=side,
+        entry=entry,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
+        atr_value=atr,
+        minimum_rr=MINIMUM_RR,
+    )
+
+    if not validation.valid:
+        return None, list(validation.reasons)
+
+    local_strength = min(m15_adx, m30_adx)
+    confidence = min(
+        85.0,
+        local_strength * 0.7 + min(m15_adx, 50.0) * 0.6,
     )
 
     trend_label = (
@@ -453,25 +593,67 @@ def _try_short_term_signal(
         else "SHORT-TERM | MTF: UNKNOWN"
     )
 
-    result, reasons = _build_trade_result(
+    reasons = (
+        [
+            "SHORT-TERM SIGNAL",
+            "M15 va M30 EMA20/EMA50 bir yo'nalishda",
+            f"M15 ADX: {m15_adx:.2f}",
+            f"M30 ADX: {m30_adx:.2f}",
+        ]
+        + confirmations
+        + observations
+    )
+
+    signal = Signal(
         symbol=symbol,
-        direction=local_direction,
-        candles=m15,
-        m30_indicators=m30_indicators,
-        trend_label=trend_label,
-        strength=local_strength,
-        timeframe_label="M15-ST",
+        timeframe="M15-ST",
+        side=side,
+        entry=entry,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
+        risk_reward=MINIMUM_RR,
+        confidence=round(confidence, 2),
+        reason="; ".join(reasons),
     )
 
-    if result is None:
-        return None
+    return AnalysisResult(
+        symbol=symbol,
+        timeframe="M15-ST",
+        signal=signal,
+        trend=trend_label,
+        strength=round(local_strength, 2),
+        reasons=tuple(reasons),
+    ), reasons
 
-    result.signal.reason = (
-        "SHORT-TERM SIGNAL | M15 va M30 mustaqil yo'nalishi tasdiqlandi | "
-        + result.signal.reason
+
+def _try_short_term_signal(
+    symbol,
+    m15,
+    m30,
+    overall,
+):
+    m15_indicators = calculate_indicators(m15)
+    m30_indicators = calculate_indicators(m30)
+
+    m15_direction = _ema_direction(m15_indicators)
+    m30_direction = _ema_direction(m30_indicators)
+
+    if m15_direction not in ("BULLISH", "BEARISH"):
+        return None, [f"M15 EMA yo'nalishi noaniq: {m15_direction}"]
+
+    if m30_direction != m15_direction:
+        return None, [
+            f"M15/M30 EMA qarama-qarshi: "
+            f"M15={m15_direction}, M30={m30_direction}"
+        ]
+
+    return _build_short_term_result(
+        symbol=symbol,
+        direction=m15_direction,
+        m15=m15,
+        m30=m30,
+        overall=overall,
     )
-
-    return result
 
 
 def analyze_symbol(symbol, candles_by_timeframe):
@@ -571,19 +753,25 @@ def analyze_symbol(symbol, candles_by_timeframe):
             )
         )
 
-    # MAIN signal chiqmagan bo'lsa, M15/M30 mustaqil tekshiriladi.
-    # Katta timeframe noma'lum yoki qarama-qarshi bo'lsa ham
-    # qisqa muddatli yo'nalish alohida baholanadi.
+    # MAIN signal bo'lmasa, mustaqil M15/M30 strategiyasi ishlaydi.
     if not main_signal_created:
-        short_term_result = _try_short_term_signal(
+        short_result, short_diagnostics = _try_short_term_signal(
             symbol=symbol,
             m15=m15,
             m30=m30,
-            m30_indicators=m30_indicators,
             overall=overall,
         )
 
-        if short_term_result is not None:
-            results.append(short_term_result)
+        if short_result is not None:
+            results.append(short_result)
+        elif short_diagnostics:
+            # Diagnostikani HOLD natijasiga qo'shamiz.
+            hold = results[0]
+            combined = list(hold.reasons) + [
+                "SHORT-TERM: " + item
+                for item in short_diagnostics
+            ]
+            hold.reasons = tuple(combined)
+            hold.signal.reason = "; ".join(combined)
 
     return AnalysisBatch(results)
