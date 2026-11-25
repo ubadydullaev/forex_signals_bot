@@ -12,10 +12,10 @@ from v6.signal_engine import (
 def make_macd(histograms, direction="BEARISH"):
     signal = -1.0 if direction == "BEARISH" else 1.0
 
-    if direction == "BEARISH":
-        macd_values = [signal + value for value in histograms]
-    else:
-        macd_values = [signal + value for value in histograms]
+    macd_values = [
+        signal + value
+        for value in histograms
+    ]
 
     return {
         "macd": macd_values,
@@ -58,7 +58,17 @@ class TestV6MacdMomentum(unittest.TestCase):
 
     def test_opposite_macd_weakening_is_accepted(self):
         macd = make_macd(
-            [-4.0, -3.0, -2.0, -1.0],
+            [-4.0, -3.0, -2.5, -2.0],
+            "BEARISH",
+        )
+
+        state, _ = _analyze_macd_momentum(macd, "BULLISH")
+
+        self.assertEqual(state, "OPPOSING_WEAKENING")
+
+    def test_opposite_macd_weakening_after_peak_is_accepted(self):
+        macd = make_macd(
+            [-2.6, -3.3, -2.8, -2.2],
             "BEARISH",
         )
 
@@ -79,6 +89,16 @@ class TestV6MacdMomentum(unittest.TestCase):
     def test_opposite_macd_unclear_momentum_is_not_accepted(self):
         macd = make_macd(
             [-3.0, -2.0, -2.5, -2.0],
+            "BEARISH",
+        )
+
+        state, _ = _analyze_macd_momentum(macd, "BULLISH")
+
+        self.assertEqual(state, "OPPOSING_UNCLEAR")
+
+    def test_one_bar_decline_is_not_enough(self):
+        macd = make_macd(
+            [-1.0, -2.0, -3.0, -2.0],
             "BEARISH",
         )
 
@@ -129,6 +149,59 @@ class TestV6MacdMomentum(unittest.TestCase):
         state, _ = _analyze_macd_momentum(macd, "BULLISH")
 
         self.assertEqual(state, "OPPOSING_UNCLEAR")
+
+
+class TestV6M30Momentum(unittest.TestCase):
+
+    def setUp(self):
+        self.candles = make_candles(20)
+        self.structure = {
+            "trend": "BULLISH",
+            "events": [],
+            "liquidity_sweeps": [],
+        }
+
+    def test_m30_opposing_strengthening_blocks_signal(self):
+        m30 = make_indicators()
+        m30["macd"] = make_macd(
+            [-1.0, -2.0, -3.0, -4.0],
+            "BEARISH",
+        )
+
+        confirmed, reasons = _check_direction(
+            "BULLISH",
+            make_indicators(),
+            self.structure,
+            self.candles,
+            m30_indicators=m30,
+        )
+
+        self.assertFalse(confirmed)
+        self.assertTrue(
+            any("M30" in reason and "kuchaymoqda" in reason
+                for reason in reasons)
+        )
+
+    def test_m30_opposing_weakening_is_allowed(self):
+        m30 = make_indicators()
+        m30["macd"] = make_macd(
+            [-4.0, -3.0, -2.5, -2.0],
+            "BEARISH",
+        )
+
+        confirmed, reasons = _check_direction(
+            "BULLISH",
+            make_indicators(),
+            self.structure,
+            self.candles,
+            m30_indicators=m30,
+        )
+
+        self.assertTrue(confirmed)
+        self.assertTrue(
+            any("M30" in reason and "susaymoqda" in reason
+                for reason in reasons)
+        )
 
 
 class TestV6StructureWindow(unittest.TestCase):
