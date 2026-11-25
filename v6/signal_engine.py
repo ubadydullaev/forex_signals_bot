@@ -5,16 +5,25 @@ from .config import TIMEFRAMES
 from .models import Signal, AnalysisResult
 from .indicators import calculate_indicators
 from .market_structure import analyze_market_structure
-from .mtf_analysis import analyze_mtf, analyze_single_timeframe
+from .mtf_analysis import analyze_mtf
 from .validators import validate_market_data, validate_trade
 
+
+# ==========================================
+# V6 SIGNAL ENGINE SETTINGS
+# ==========================================
 
 MINIMUM_CANDLES = 200
 MINIMUM_ALIGNMENT = 80.0
 MINIMUM_ADX = 15.0
 
 SHORT_TERM_MINIMUM_ADX = 18.0
+SHORT_TERM_CONFLICT_ADX = 22.0
+SHORT_TERM_COUNTER_ADX = 22.0
+
 SHORT_TERM_MINIMUM_CONFIRMATIONS = 2
+SHORT_TERM_CONFLICT_CONFIRMATIONS = 3
+SHORT_TERM_COUNTER_CONFIRMATIONS = 4
 
 MINIMUM_RR = 1.5
 STOP_ATR_MULTIPLIER = 1.5
@@ -26,6 +35,10 @@ MACD_MOMENTUM_BARS = 4
 MACD_MOMENTUM_CHANGE_THRESHOLD = 0.12
 MINIMUM_ENTRY_CONFIRMATIONS = 3
 
+
+# ==========================================
+# ANALYSIS BATCH
+# ==========================================
 
 class AnalysisBatch:
     def __init__(self, results):
@@ -66,6 +79,10 @@ class AnalysisBatch:
     def __getitem__(self, index):
         return self.results[index]
 
+
+# ==========================================
+# COMMON HELPERS
+# ==========================================
 
 def _last_valid(values) -> Optional[float]:
     if not isinstance(values, (list, tuple)):
@@ -136,6 +153,10 @@ def _macd_values(macd_data):
     return rows
 
 
+# ==========================================
+# MACD MOMENTUM ANALYSIS
+# ==========================================
+
 def _analyze_macd_momentum(macd_data, direction):
     rows = _macd_values(macd_data)
 
@@ -177,6 +198,7 @@ def _analyze_macd_momentum(macd_data, direction):
         recent <= previous * (1 - threshold)
         and magnitudes[-1] < magnitudes[-2]
     )
+
     strengthening = (
         recent >= previous * (1 + threshold)
         and magnitudes[-1] > magnitudes[-2]
@@ -217,6 +239,10 @@ def _check_m30_momentum(direction, indicators):
 
     return True, [f"M30: {message}"]
 
+
+# ==========================================
+# MAIN TIMEFRAME VALIDATION
+# ==========================================
 
 def _check_direction(
     direction,
@@ -286,10 +312,9 @@ def _check_direction(
             candle.timestamp
             for candle in candles[-RECENT_STRUCTURE_CANDLES:]
         }
-        events = structure.get("events", [])
 
         recent_events = [
-            event for event in events
+            event for event in structure.get("events", [])
             if event.timestamp in recent_timestamps
             and event.direction == direction
         ]
@@ -304,6 +329,7 @@ def _check_direction(
             direction,
             m30_indicators,
         )
+
         if not m30_ok:
             blockers.extend(m30_reasons)
         else:
@@ -313,6 +339,7 @@ def _check_direction(
         candle.timestamp
         for candle in candles[-RECENT_LIQUIDITY_CANDLES:]
     }
+
     sweeps = structure.get("liquidity_sweeps", [])
 
     matching_sweeps = [
@@ -333,6 +360,10 @@ def _check_direction(
     reasons = blockers + confirmations + observations
     return len(blockers) == 0, reasons
 
+
+# ==========================================
+# MAIN TRADE BUILDER
+# ==========================================
 
 def _build_trade_result(
     symbol,
@@ -386,6 +417,7 @@ def _build_trade_result(
         return None, validation.reasons
 
     adx = _last_valid(indicators.get("adx", {}).get("adx")) or 0.0
+
     confidence = min(
         85.0,
         strength * 0.7 + min(adx, 50.0) * 0.6,
@@ -415,6 +447,10 @@ def _build_trade_result(
     return result, reasons
 
 
+# ==========================================
+# EMA DIRECTION
+# ==========================================
+
 def _ema_direction(indicators):
     ema20 = _last_valid(indicators.get("ema_20"))
     ema50 = _last_valid(indicators.get("ema_50"))
@@ -431,12 +467,19 @@ def _ema_direction(indicators):
     return "UNKNOWN"
 
 
+# ==========================================
+# SHORT-TERM SIGNAL ENGINE
+# ==========================================
+
 def _build_short_term_result(
     symbol,
     direction,
     m15,
     m30,
     overall,
+    ema_conflict=False,
+    countertrend=False,
+    unclear_context=False,
 ):
     m15_indicators = calculate_indicators(m15)
     m30_indicators = calculate_indicators(m30)
@@ -445,41 +488,59 @@ def _build_short_term_result(
     m30_adx = _last_valid(m30_indicators.get("adx", {}).get("adx"))
 
     diagnostics = []
-
-    if m15_adx is None or m15_adx < SHORT_TERM_MINIMUM_ADX:
-        diagnostics.append(f"M15 ADX past: {m15_adx}")
-        return None, diagnostics
-
-    if m30_adx is None or m30_adx < SHORT_TERM_MINIMUM_ADX:
-        diagnostics.append(f"M30 ADX past: {m30_adx}")
-        return None, diagnostics
-
-    m15_direction = _ema_direction(m15_indicators)
-    m30_direction = _ema_direction(m30_indicators)
-
-    if m15_direction != direction or m30_direction != direction:
-        diagnostics.append(
-            f"EMA yo'nalish mos emas: M15={m15_direction}, "
-            f"M30={m30_direction}, kutilgan={direction}"
-        )
-        return None, diagnostics
-
+    blockers = []
     confirmations = []
     observations = []
-    blockers = []
 
-    # 1. M15 Supertrend.
+    # --------------------------------------
+    # 1. ADX FILTER
+    # --------------------------------------
+
+    if m15_adx is None or m15_adx < SHORT_TERM_MINIMUM_ADX:
+        return None, [f"M15 ADX past: {m15_adx}"]
+
+    if m30_adx is None or m30_adx < SHORT_TERM_MINIMUM_ADX:
+        return None, [f"M30 ADX past: {m30_adx}"]
+
+    if ema_conflict:
+        if m15_adx < SHORT_TERM_CONFLICT_ADX:
+            return None, [
+                f"EMA qarama-qarshi: M15 ADX {m15_adx:.2f}, "
+                f"minimum {SHORT_TERM_CONFLICT_ADX:.0f}"
+            ]
+
+    if countertrend:
+        if (
+            m15_adx < SHORT_TERM_COUNTER_ADX
+            or m30_adx < SHORT_TERM_COUNTER_ADX
+        ):
+            return None, [
+                "COUNTER-TREND bloklandi: "
+                f"M15 ADX={m15_adx:.2f}, M30 ADX={m30_adx:.2f}; "
+                f"ikkalasi kamida {SHORT_TERM_COUNTER_ADX:.0f} bo'lishi kerak"
+            ]
+
+    # --------------------------------------
+    # 2. M15 SUPERTREND
+    # --------------------------------------
+
     expected = 1 if direction == "BULLISH" else -1
+
     m15_st = _last_valid(
         m15_indicators.get("supertrend", {}).get("direction")
     )
 
-    if m15_st == expected:
+    st_confirmed = m15_st == expected
+
+    if st_confirmed:
         confirmations.append("M15 Supertrend tasdiqladi")
     else:
         observations.append("M15 Supertrend yo'nalishni tasdiqlamadi")
 
-    # 2. RSI: qisqa muddatli momentum uchun kengroq diapazon.
+    # --------------------------------------
+    # 3. RSI
+    # --------------------------------------
+
     rsi = _last_valid(m15_indicators.get("rsi_14"))
 
     if rsi is None:
@@ -491,7 +552,10 @@ def _build_short_term_result(
     else:
         blockers.append(f"M15 RSI momentum mos emas: {rsi:.2f}")
 
-    # 3. M15 MACD.
+    # --------------------------------------
+    # 4. M15 MACD
+    # --------------------------------------
+
     m15_macd_state, m15_macd_message = _analyze_macd_momentum(
         m15_indicators.get("macd"),
         direction,
@@ -499,14 +563,27 @@ def _build_short_term_result(
 
     if m15_macd_state == "OPPOSING_STRENGTHENING":
         blockers.append(f"M15 {m15_macd_message}")
+
     elif m15_macd_state == "ALIGNED":
         confirmations.append("M15 MACD yo'nalishni tasdiqladi")
+
     elif m15_macd_state == "OPPOSING_WEAKENING":
         confirmations.append(m15_macd_message)
+
     else:
         observations.append(f"M15 {m15_macd_message}")
 
-    # 4. M30 MACD: kuchayib borayotgan qarama-qarshi momentum bloklaydi.
+    # Qarama-qarshi katta trendga qarshi savdoda
+    # M15 MACD albatta signal yo'nalishida bo'lishi shart.
+    if countertrend and m15_macd_state != "ALIGNED":
+        blockers.append(
+            "COUNTER-TREND bloklandi: M15 MACD to'liq tasdiqlamadi"
+        )
+
+    # --------------------------------------
+    # 5. M30 MACD
+    # --------------------------------------
+
     m30_macd_state, m30_macd_message = _analyze_macd_momentum(
         m30_indicators.get("macd"),
         direction,
@@ -514,16 +591,31 @@ def _build_short_term_result(
 
     if m30_macd_state == "OPPOSING_STRENGTHENING":
         blockers.append(f"M30 {m30_macd_message}")
+
     elif m30_macd_state == "ALIGNED":
         confirmations.append("M30 MACD yo'nalishni tasdiqladi")
+
     else:
         observations.append(f"M30 {m30_macd_message}")
 
-    # 5. Market structure: trend yoki yaqinda yuz bergan BOS/CHOCH.
+    # EMA qarama-qarshi yoki katta trendga qarshi savdoda
+    # M30 MACD mustaqil tasdiq berishi shart.
+    if (ema_conflict or countertrend) and m30_macd_state != "ALIGNED":
+        blockers.append(
+            "Kuchaytirilgan filtr: M30 MACD yo'nalishni tasdiqlamadi"
+        )
+
+    # --------------------------------------
+    # 6. MARKET STRUCTURE
+    # --------------------------------------
+
     structure = analyze_market_structure(m15)
     structure_trend = structure.get("trend", "UNKNOWN")
 
+    structure_confirmed = False
+
     if structure_trend == direction:
+        structure_confirmed = True
         confirmations.append("M15 market structure tasdiqladi")
     else:
         recent_timestamps = {
@@ -538,20 +630,88 @@ def _build_short_term_result(
         ]
 
         if recent_events:
+            structure_confirmed = True
             confirmations.append("M15 yaqinda BOS/CHOCH tasdiqladi")
         else:
             observations.append("M15 yangi BOS/CHOCH topilmadi")
 
-    # RSI va kuchli qarama-qarshi MACD majburiy xavfsizlik tekshiruvlari.
+    # --------------------------------------
+    # 7. SPECIAL FILTERS
+    # --------------------------------------
+
+    if ema_conflict:
+        observations.append(
+            "M15/M30 EMA qarama-qarshi: kuchaytirilgan filtr ishladi"
+        )
+
+        if not st_confirmed:
+            blockers.append(
+                "EMA qarama-qarshi holatda M15 Supertrend tasdig'i shart"
+            )
+
+        if not structure_confirmed:
+            blockers.append(
+                "EMA qarama-qarshi holatda M15 BOS/CHOCH yoki structure shart"
+            )
+
+    if countertrend:
+        observations.append(
+            f"COUNTER-TREND: katta MTF yo'nalishi {overall}, "
+            f"signal yo'nalishi {direction}"
+        )
+
+        if not st_confirmed:
+            blockers.append(
+                "COUNTER-TREND bloklandi: M15 Supertrend tasdig'i yo'q"
+            )
+
+        if not structure_confirmed:
+            blockers.append(
+                "COUNTER-TREND bloklandi: M15 structure tasdig'i yo'q"
+            )
+
+    if unclear_context:
+        observations.append(
+            "MTF yo'nalishi noaniq: qo'shimcha tasdiqlar talab qilinadi"
+        )
+
+        if not st_confirmed or not structure_confirmed:
+            blockers.append(
+                "MTF noaniq holatda Supertrend va structure ikkalasi shart"
+            )
+
     if blockers:
         return None, blockers + confirmations + observations
 
-    if len(confirmations) < SHORT_TERM_MINIMUM_CONFIRMATIONS:
-        diagnostics.append(
-            f"Qisqa signal tasdiqlari yetarli emas: "
-            f"{len(confirmations)}/{SHORT_TERM_MINIMUM_CONFIRMATIONS}"
+    # --------------------------------------
+    # 8. CONFIRMATION REQUIREMENTS
+    # --------------------------------------
+
+    required_confirmations = SHORT_TERM_MINIMUM_CONFIRMATIONS
+
+    if ema_conflict or unclear_context:
+        required_confirmations = max(
+            required_confirmations,
+            SHORT_TERM_CONFLICT_CONFIRMATIONS,
         )
+
+    if countertrend:
+        required_confirmations = max(
+            required_confirmations,
+            SHORT_TERM_COUNTER_CONFIRMATIONS,
+        )
+
+    if len(confirmations) < required_confirmations:
+        diagnostics.append(
+            f"Tasdiqlar yetarli emas: "
+            f"{len(confirmations)}/{required_confirmations}"
+        )
+
         return None, diagnostics + confirmations + observations
+
+    # --------------------------------------
+    # 9. ENTRY / SL / TP
+    # --------------------------------------
 
     entry = m15[-1].close
     atr = _last_valid(m15_indicators.get("atr_14"))
@@ -581,28 +741,46 @@ def _build_short_term_result(
     if not validation.valid:
         return None, list(validation.reasons)
 
+    # --------------------------------------
+    # 10. CONFIDENCE
+    # --------------------------------------
+
     local_strength = min(m15_adx, m30_adx)
+
     confidence = min(
         85.0,
         local_strength * 0.7 + min(m15_adx, 50.0) * 0.6,
     )
 
-    trend_label = (
-        f"SHORT-TERM | MTF: {overall}"
-        if overall in ("BULLISH", "BEARISH")
-        else "SHORT-TERM | MTF: UNKNOWN"
-    )
+    if ema_conflict:
+        confidence = min(confidence, 82.0)
 
-    reasons = (
-        [
-            "SHORT-TERM SIGNAL",
-            "M15 va M30 EMA20/EMA50 bir yo'nalishda",
-            f"M15 ADX: {m15_adx:.2f}",
-            f"M30 ADX: {m30_adx:.2f}",
-        ]
-        + confirmations
-        + observations
-    )
+    if countertrend:
+        confidence = min(confidence, 80.0)
+
+    if unclear_context:
+        confidence = min(confidence, 82.0)
+
+    # --------------------------------------
+    # 11. SIGNAL REASONS
+    # --------------------------------------
+
+    if countertrend:
+        signal_type = "COUNTER-TREND SHORT-TERM"
+    elif ema_conflict:
+        signal_type = "EMA-CONFLICT SHORT-TERM"
+    else:
+        signal_type = "SHORT-TERM SIGNAL"
+
+    reasons = [
+        signal_type,
+        f"M15 ADX: {m15_adx:.2f}",
+        f"M30 ADX: {m30_adx:.2f}",
+        f"EMA M15: {_ema_direction(m15_indicators)}",
+        f"EMA M30: {_ema_direction(m30_indicators)}",
+        f"MTF: {overall}",
+        f"Tasdiqlar: {len(confirmations)}/{required_confirmations}",
+    ] + confirmations + observations
 
     signal = Signal(
         symbol=symbol,
@@ -620,11 +798,15 @@ def _build_short_term_result(
         symbol=symbol,
         timeframe="M15-ST",
         signal=signal,
-        trend=trend_label,
+        trend=f"SHORT-TERM | MTF: {overall}",
         strength=round(local_strength, 2),
         reasons=tuple(reasons),
     ), reasons
 
+
+# ==========================================
+# SHORT-TERM SIGNAL ROUTER
+# ==========================================
 
 def _try_short_term_signal(
     symbol,
@@ -639,13 +821,23 @@ def _try_short_term_signal(
     m30_direction = _ema_direction(m30_indicators)
 
     if m15_direction not in ("BULLISH", "BEARISH"):
-        return None, [f"M15 EMA yo'nalishi noaniq: {m15_direction}"]
-
-    if m30_direction != m15_direction:
         return None, [
-            f"M15/M30 EMA qarama-qarshi: "
-            f"M15={m15_direction}, M30={m30_direction}"
+            f"M15 EMA yo'nalishi noaniq: {m15_direction}"
         ]
+
+    if m30_direction == "UNKNOWN":
+        return None, [
+            "M30 EMA yo'nalishi noaniq: ishonchli tasdiq yo'q"
+        ]
+
+    ema_conflict = m30_direction != m15_direction
+
+    countertrend = (
+        overall in ("BULLISH", "BEARISH")
+        and overall != m15_direction
+    )
+
+    unclear_context = overall not in ("BULLISH", "BEARISH")
 
     return _build_short_term_result(
         symbol=symbol,
@@ -653,10 +845,18 @@ def _try_short_term_signal(
         m15=m15,
         m30=m30,
         overall=overall,
+        ema_conflict=ema_conflict,
+        countertrend=countertrend,
+        unclear_context=unclear_context,
     )
 
 
+# ==========================================
+# COMPLETE SYMBOL ANALYSIS
+# ==========================================
+
 def analyze_symbol(symbol, candles_by_timeframe):
+    # 1. Data validation
     for timeframe in TIMEFRAMES:
         candles = candles_by_timeframe.get(timeframe, [])
 
@@ -670,20 +870,29 @@ def analyze_symbol(symbol, candles_by_timeframe):
                 f"{timeframe} data rejected: "
                 + "; ".join(validation.reasons)
             )
-            return AnalysisBatch([_hold_result(symbol, reason)])
 
+            return AnalysisBatch([
+                _hold_result(symbol, reason)
+            ])
+
+    # 2. MTF analysis
     mtf = analyze_mtf(candles_by_timeframe)
+
     overall = mtf["overall_trend"]
     alignment = mtf["alignment_percent"]
 
     m15 = candles_by_timeframe["M15"]
     m30 = candles_by_timeframe["M30"]
+
     m30_indicators = calculate_indicators(m30)
 
     results = []
     main_signal_created = False
 
-    # Asosiy katta timeframe signali.
+    # --------------------------------------
+    # MAIN SIGNAL
+    # --------------------------------------
+
     if overall in ("BULLISH", "BEARISH"):
         main_blockers = []
 
@@ -714,6 +923,7 @@ def analyze_symbol(symbol, candles_by_timeframe):
 
         if main_blockers:
             combined = main_blockers + main_reasons
+
             results.append(
                 _hold_result(
                     symbol,
@@ -728,6 +938,7 @@ def analyze_symbol(symbol, candles_by_timeframe):
             main_result.signal.reason = (
                 "MAIN SIGNAL | " + main_result.signal.reason
             )
+
             results.append(main_result)
             main_signal_created = True
 
@@ -753,7 +964,12 @@ def analyze_symbol(symbol, candles_by_timeframe):
             )
         )
 
-    # MAIN signal bo'lmasa, mustaqil M15/M30 strategiyasi ishlaydi.
+    # --------------------------------------
+    # SHORT-TERM SIGNAL
+    # --------------------------------------
+
+    # MAIN signal yaratilmagan bo'lsa,
+    # M15/M30 strategiyasi alohida tekshiriladi.
     if not main_signal_created:
         short_result, short_diagnostics = _try_short_term_signal(
             symbol=symbol,
@@ -764,13 +980,15 @@ def analyze_symbol(symbol, candles_by_timeframe):
 
         if short_result is not None:
             results.append(short_result)
+
         elif short_diagnostics:
-            # Diagnostikani HOLD natijasiga qo'shamiz.
             hold = results[0]
+
             combined = list(hold.reasons) + [
                 "SHORT-TERM: " + item
                 for item in short_diagnostics
             ]
+
             hold.reasons = tuple(combined)
             hold.signal.reason = "; ".join(combined)
 
