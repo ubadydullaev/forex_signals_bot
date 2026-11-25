@@ -8,6 +8,7 @@ import sys
 
 import requests
 
+from .indicators import calculate_indicators
 from .config import SYMBOLS, TIMEFRAMES
 from .data_pipeline import get_verified_market_data
 from .mtf_analysis import analyze_single_timeframe
@@ -503,18 +504,79 @@ def _fmt_metric(value, digits=2):
     return f"{float(value):.{digits}f}"
 
 
+
 def log_timeframe_analysis(candles_by_timeframe):
-    """Har bir timeframe indikatorlari va trendini diagnostika uchun yozadi."""
+    """Har bir timeframe trendi va MACD momentumini logga yozadi."""
     for timeframe in TIMEFRAMES:
+        candles = candles_by_timeframe.get(timeframe, [])
+
         result = analyze_single_timeframe(
-            candles_by_timeframe.get(timeframe, []),
+            candles,
             timeframe,
         )
+
+        macd_main = None
+        macd_signal = None
+        macd_hist = None
+        macd_previous = None
+        macd_state = "UNAVAILABLE"
+
+        try:
+            if candles:
+                indicators = calculate_indicators(candles)
+                macd_data = indicators["macd"]
+
+                main_values = [
+                    x for x in macd_data["macd"] if x is not None
+                ]
+                signal_values = [
+                    x for x in macd_data["signal"] if x is not None
+                ]
+                hist_values = [
+                    x for x in macd_data["histogram"] if x is not None
+                ]
+
+                if main_values and signal_values and hist_values:
+                    macd_main = main_values[-1]
+                    macd_signal = signal_values[-1]
+                    macd_hist = hist_values[-1]
+
+                    if len(hist_values) >= 2:
+                        macd_previous = hist_values[-2]
+
+                    if macd_main > macd_signal and macd_hist > 0:
+                        macd_state = "BULLISH"
+                    elif macd_main < macd_signal and macd_hist < 0:
+                        macd_state = "BEARISH"
+                    else:
+                        macd_state = "NEUTRAL"
+
+        except Exception as exc:
+            logger.warning(
+                "[MACD DIAGNOSTIC ERROR] %s | %s",
+                timeframe,
+                exc,
+            )
+
+        momentum = "N/A"
+
+        if macd_hist is not None and macd_previous is not None:
+            current_abs = abs(macd_hist)
+            previous_abs = abs(macd_previous)
+
+            if current_abs < previous_abs:
+                momentum = "WEAKENING"
+            elif current_abs > previous_abs:
+                momentum = "STRENGTHENING"
+            else:
+                momentum = "FLAT"
 
         logger.info(
             "[TIMEFRAME ANALYSIS] %s | trend=%s | ADX=%s | RSI=%s | "
             "EMA20=%s | EMA50=%s | EMA200=%s | Supertrend=%s | "
-            "structure=%s | reasons=%s",
+            "structure=%s | MACD=%s | MACD_LINE=%s | "
+            "MACD_SIGNAL=%s | HIST=%s | PREV_HIST=%s | "
+            "MOMENTUM=%s | reasons=%s",
             timeframe,
             result["trend"],
             _fmt_metric(result["adx"]),
@@ -524,8 +586,15 @@ def log_timeframe_analysis(candles_by_timeframe):
             _fmt_metric(result["ema_200"], 5),
             result["supertrend_direction"],
             result["structure_trend"],
+            macd_state,
+            _fmt_metric(macd_main, 6),
+            _fmt_metric(macd_signal, 6),
+            _fmt_metric(macd_hist, 6),
+            _fmt_metric(macd_previous, 6),
+            momentum,
             "; ".join(result["reasons"]),
         )
+
 
 
 def analyze_one_symbol(symbol):
