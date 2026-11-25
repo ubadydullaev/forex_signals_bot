@@ -14,7 +14,14 @@ MINIMUM_ALIGNMENT = 80.0
 MINIMUM_ADX = 15.0
 MINIMUM_RR = 1.5
 STOP_ATR_MULTIPLIER = 1.5
-RECENT_STRUCTURE_CANDLES = 3
+
+# BOS/CHOCH uchun oxirgi 12 ta yopilgan M15 sham.
+RECENT_STRUCTURE_CANDLES = 12
+
+# Likvidlik sweep alohida, avvalgi 3 shamda tekshiriladi.
+RECENT_LIQUIDITY_CANDLES = 3
+
+MACD_MOMENTUM_BARS = 4
 
 
 def _last_valid(values) -> Optional[float]:
@@ -52,22 +59,113 @@ def _hold_result(
     )
 
 
-def _get_macd_direction(macd_data):
-    macd_line = _last_valid(macd_data["macd"])
-    signal_line = _last_valid(macd_data["signal"])
-    histogram = _last_valid(macd_data["histogram"])
+def _macd_values(macd_data):
+    """MACD, signal va histogramma qiymatlarini juft holda oladi."""
+    macd_values = macd_data.get("macd", [])
+    signal_values = macd_data.get("signal", [])
+    histogram_values = macd_data.get("histogram", [])
 
-    if (
-        macd_line is None
-        or signal_line is None
-        or histogram is None
-    ):
+    length = min(
+        len(macd_values),
+        len(signal_values),
+        len(histogram_values),
+    )
+
+    rows = []
+
+    for i in range(length):
+        main = macd_values[i]
+        signal = signal_values[i]
+        histogram = histogram_values[i]
+
+        if main is None or signal is None or histogram is None:
+            continue
+
+        rows.append((
+            float(main),
+            float(signal),
+            float(histogram),
+        ))
+
+    return rows
+
+
+def _analyze_macd_momentum(macd_data, direction):
+    """
+    MACD holati va momentumini tekshiradi.
+
+    Opposite MACD faqat oxirgi 4 ta qiymatda histogramma
+    ketma-ket kichrayganida susayayotgan deb qabul qilinadi.
+    Boshqa noaniq holatlarda signal xavfsizlik uchun HOLD bo'ladi.
+    """
+    rows = _macd_values(macd_data)
+
+    if not rows:
+        return "UNKNOWN", "MACD ma'lumotlari mavjud emas"
+
+    main, signal, histogram = rows[-1]
+
+    if main > signal and histogram > 0:
+        macd_direction = "BULLISH"
+    elif main < signal and histogram < 0:
+        macd_direction = "BEARISH"
+    else:
+        return "NEUTRAL", "MACD neytral"
+
+    if macd_direction == direction:
+        return "ALIGNED", "MACD asosiy yo'nalishni tasdiqladi"
+
+    if len(rows) < MACD_MOMENTUM_BARS:
+        return (
+            "OPPOSING_UNCLEAR",
+            "MACD qarama-qarshi, momentum uchun 4 ta qiymat yetarli emas",
+        )
+
+    magnitudes = [
+        abs(row[2])
+        for row in rows[-MACD_MOMENTUM_BARS:]
+    ]
+
+    weakening = all(
+        magnitudes[i] > magnitudes[i + 1]
+        for i in range(len(magnitudes) - 1)
+    )
+
+    if weakening:
+        return (
+            "OPPOSING_WEAKENING",
+            "MACD qarama-qarshi, lekin momentum 3 bosqichda susaymoqda",
+        )
+
+    strengthening = (
+        magnitudes[-1] > magnitudes[-2]
+    )
+
+    if strengthening:
+        return (
+            "OPPOSING_STRENGTHENING",
+            "MACD qarama-qarshi va momentum kuchaymoqda",
+        )
+
+    return (
+        "OPPOSING_UNCLEAR",
+        "MACD qarama-qarshi, momentum susayishi tasdiqlanmadi",
+    )
+
+
+def _get_macd_direction(macd_data):
+    """Eski chaqiruvlar bilan moslik uchun saqlangan yordamchi funksiya."""
+    rows = _macd_values(macd_data)
+
+    if not rows:
         return "UNKNOWN"
 
-    if macd_line > signal_line and histogram > 0:
+    main, signal, histogram = rows[-1]
+
+    if main > signal and histogram > 0:
         return "BULLISH"
 
-    if macd_line < signal_line and histogram < 0:
+    if main < signal and histogram < 0:
         return "BEARISH"
 
     return "NEUTRAL"
@@ -79,11 +177,7 @@ def _check_direction(
     structure,
     m15_candles,
 ):
-    """
-    Barcha M15 filtrlarini tekshiradi.
-    Birinchi xatoda to'xtamaydi.
-    Signal qoidalari avvalgidek: barcha majburiy filtrlar o'tishi kerak.
-    """
+    """Barcha M15 filtrlarini tekshiradi va barcha to'siqlarni yig'adi."""
     failures = []
     confirmations = []
 
@@ -104,10 +198,6 @@ def _check_direction(
 
     adx_value = _last_valid(
         m15_indicators["adx"]["adx"]
-    )
-
-    macd_direction = _get_macd_direction(
-        m15_indicators["macd"]
     )
 
     # 1. Supertrend
@@ -136,7 +226,7 @@ def _check_direction(
                 f"RSI confirmation: {rsi_value:.2f}"
             )
 
-    # 3. ADX — minimum 15
+    # 3. ADX
     if adx_value is None or adx_value < MINIMUM_ADX:
         value_text = (
             "unavailable"
@@ -152,17 +242,26 @@ def _check_direction(
             f"ADX confirmation: {adx_value:.2f}"
         )
 
-    # 4. MACD — neutral accepted, opposite rejected
-    if macd_direction == "UNKNOWN":
+    # 4. MACD momentum
+    macd_state, macd_message = _analyze_macd_momentum(
+        m15_indicators["macd"],
+        direction,
+    )
+
+    if macd_state == "UNKNOWN":
         failures.append("MACD data unavailable")
-    elif macd_direction not in (direction, "NEUTRAL"):
-        failures.append("MACD opposes signal direction")
-    elif macd_direction == direction:
-        confirmations.append("MACD confirmed")
+    elif macd_state == "OPPOSING_STRENGTHENING":
+        failures.append(macd_message)
+    elif macd_state == "OPPOSING_UNCLEAR":
+        failures.append(macd_message)
+    elif macd_state == "OPPOSING_WEAKENING":
+        confirmations.append(macd_message)
+    elif macd_state == "ALIGNED":
+        confirmations.append(macd_message)
     else:
         confirmations.append("MACD neutral — accepted")
 
-    # 5. Market structure / recent BOS-CHOCH
+    # 5. Market structure / BOS-CHOCH
     structure_trend = structure["trend"]
 
     if structure_trend == direction:
@@ -186,24 +285,25 @@ def _check_direction(
 
         if not recent_events:
             failures.append(
-                "No recent BOS/CHOCH confirmation"
+                "No matching BOS/CHOCH in last "
+                f"{RECENT_STRUCTURE_CANDLES} M15 candles"
             )
         else:
             confirmations.append(
                 "Recent BOS/CHOCH confirmed"
             )
 
-    # 6. Liquidity sweep — qo'shimcha dalil, majburiy emas
-    recent_timestamps = {
+    # 6. Liquidity sweep — qo'shimcha tasdiq, majburiy emas
+    recent_sweep_timestamps = {
         candle.timestamp
-        for candle in m15_candles[-RECENT_STRUCTURE_CANDLES:]
+        for candle in m15_candles[-RECENT_LIQUIDITY_CANDLES:]
     }
 
     recent_sweeps = [
         sweep
         for sweep in structure["liquidity_sweeps"]
         if (
-            sweep.timestamp in recent_timestamps
+            sweep.timestamp in recent_sweep_timestamps
             and sweep.direction == direction
         )
     ]
@@ -224,7 +324,7 @@ def analyze_symbol(
     candles_by_timeframe: dict[str, list[Candle]],
 ) -> AnalysisResult:
 
-    # 1. Ma'lumotlarni tekshirish — avvalgidek majburiy
+    # 1. Ma'lumotlarni tekshirish
     for timeframe in TIMEFRAMES:
         candles = candles_by_timeframe.get(timeframe, [])
 
@@ -250,8 +350,6 @@ def analyze_symbol(
     overall_trend = mtf["overall_trend"]
     alignment = mtf["alignment_percent"]
 
-    # Yo'nalish noma'lum bo'lsa M15 BUY/SELL filtrlarini
-    # yo'nalishsiz tekshirish mumkin emas.
     if overall_trend not in ("BULLISH", "BEARISH"):
         return _hold_result(
             symbol,
@@ -260,7 +358,6 @@ def analyze_symbol(
             strength=alignment,
         )
 
-    # MTF to'siqlarini yig'amiz, lekin shu yerda to'xtamaymiz.
     blockers = []
 
     if alignment < MINIMUM_ALIGNMENT:
@@ -275,13 +372,13 @@ def analyze_symbol(
             "D1, H4 and H1 do not fully agree"
         )
 
-    # M30 tasdig'i majburiyligicha qoladi.
+    # M30 majburiy tasdiq bo'lib qoladi.
     if not mtf["lower_confirmation"]:
         blockers.append(
             "M30 does not confirm the higher-timeframe direction"
         )
 
-    # 3. M15 indikatorlari — MTF bloklangan bo'lsa ham tekshiriladi.
+    # 3. M15 indikatorlari va struktura
     m15_candles = candles_by_timeframe["M15"]
 
     indicators = calculate_indicators(m15_candles)
@@ -290,7 +387,7 @@ def analyze_symbol(
     direction = overall_trend
     side = "BUY" if direction == "BULLISH" else "SELL"
 
-    # 4. Barcha M15 filtrlarini tekshirish
+    # 4. M15 filtrlarining barchasini tekshirish
     confirmed, confirmation_reasons = _check_direction(
         direction=direction,
         m15_indicators=indicators,
@@ -301,7 +398,6 @@ def analyze_symbol(
     if not confirmed:
         blockers.extend(confirmation_reasons)
 
-    # Barcha MTF va M15 to'siqlari bitta natijada qaytariladi.
     if blockers:
         reason = "; ".join(blockers)
 
@@ -313,7 +409,7 @@ def analyze_symbol(
             reasons=tuple(blockers),
         )
 
-    # 5. Entry, SL va TP — o'zgarishsiz
+    # 5. Entry, SL va TP — formulalar o'zgarmagan
     latest_candle = m15_candles[-1]
     entry = latest_candle.close
 
@@ -336,7 +432,7 @@ def analyze_symbol(
         stop_loss = entry + stop_distance
         take_profit = entry - stop_distance * MINIMUM_RR
 
-    # 6. Savdo tekshiruvi — o'zgarishsiz
+    # 6. Savdo tekshiruvi
     validation = validate_trade(
         side=side,
         entry=entry,
@@ -357,7 +453,7 @@ def analyze_symbol(
             reasons=tuple(validation.reasons),
         )
 
-    # 7. Ishonchlilik ko'rsatkichi — o'zgarishsiz
+    # 7. Ishonchlilik hisoblash formulasi o'zgarmagan
     adx_for_confidence = (
         _last_valid(indicators["adx"]["adx"]) or 0.0
     )
