@@ -12,7 +12,10 @@ from .validators import validate_market_data, validate_trade
 MINIMUM_CANDLES = 200
 MINIMUM_ALIGNMENT = 80.0
 MINIMUM_ADX = 15.0
-COUNTER_MINIMUM_ADX = 18.0
+
+# Qisqa muddatli setup uchun alohida ADX talabi.
+SHORT_TERM_MINIMUM_ADX = 18.0
+
 MINIMUM_RR = 1.5
 STOP_ATR_MULTIPLIER = 1.5
 
@@ -86,7 +89,9 @@ def _hold_result(
     strength=0.0,
     reasons=None,
 ):
-    diagnostic_reasons = tuple(reasons) if reasons is not None else (reason,)
+    diagnostic_reasons = (
+        tuple(reasons) if reasons is not None else (reason,)
+    )
     complete_reason = "; ".join(diagnostic_reasons) or reason
 
     return AnalysisResult(
@@ -410,9 +415,69 @@ def _build_trade_result(
     return result, reasons
 
 
+def _try_short_term_signal(
+    symbol,
+    m15,
+    m30,
+    m30_indicators,
+    overall,
+):
+    m15_trend = analyze_single_timeframe(m15, "M15")
+    m30_trend = analyze_single_timeframe(m30, "M30")
+
+    local_direction = m15_trend.get("trend")
+
+    if local_direction not in ("BULLISH", "BEARISH"):
+        return None
+
+    if m30_trend.get("trend") != local_direction:
+        return None
+
+    m15_adx = m15_trend.get("adx") or 0
+    m30_adx = m30_trend.get("adx") or 0
+
+    if m15_adx < SHORT_TERM_MINIMUM_ADX:
+        return None
+
+    if m30_adx < SHORT_TERM_MINIMUM_ADX:
+        return None
+
+    local_strength = min(
+        m15_trend.get("strength") or 0,
+        m30_trend.get("strength") or 0,
+    )
+
+    trend_label = (
+        f"SHORT-TERM | MTF: {overall}"
+        if overall in ("BULLISH", "BEARISH")
+        else "SHORT-TERM | MTF: UNKNOWN"
+    )
+
+    result, reasons = _build_trade_result(
+        symbol=symbol,
+        direction=local_direction,
+        candles=m15,
+        m30_indicators=m30_indicators,
+        trend_label=trend_label,
+        strength=local_strength,
+        timeframe_label="M15-ST",
+    )
+
+    if result is None:
+        return None
+
+    result.signal.reason = (
+        "SHORT-TERM SIGNAL | M15 va M30 mustaqil yo'nalishi tasdiqlandi | "
+        + result.signal.reason
+    )
+
+    return result
+
+
 def analyze_symbol(symbol, candles_by_timeframe):
     for timeframe in TIMEFRAMES:
         candles = candles_by_timeframe.get(timeframe, [])
+
         validation = validate_market_data(
             candles,
             minimum_candles=MINIMUM_CANDLES,
@@ -429,107 +494,96 @@ def analyze_symbol(symbol, candles_by_timeframe):
     overall = mtf["overall_trend"]
     alignment = mtf["alignment_percent"]
 
-    if overall not in ("BULLISH", "BEARISH"):
-        return AnalysisBatch([
+    m15 = candles_by_timeframe["M15"]
+    m30 = candles_by_timeframe["M30"]
+    m30_indicators = calculate_indicators(m30)
+
+    results = []
+    main_signal_created = False
+
+    # Asosiy katta timeframe signali.
+    if overall in ("BULLISH", "BEARISH"):
+        main_blockers = []
+
+        if alignment < MINIMUM_ALIGNMENT:
+            main_blockers.append(
+                f"MTF alignment past: {alignment:.2f}%"
+            )
+
+        if not mtf["higher_confirmation"]:
+            main_blockers.append(
+                "D1, H4 and H1 tasdig'i yetarli emas"
+            )
+
+        if not mtf["lower_confirmation"]:
+            main_blockers.append(
+                "M30 katta timeframe yo'nalishini tasdiqlamadi"
+            )
+
+        main_result, main_reasons = _build_trade_result(
+            symbol=symbol,
+            direction=overall,
+            candles=m15,
+            m30_indicators=m30_indicators,
+            trend_label=overall,
+            strength=alignment,
+            timeframe_label="M15",
+        )
+
+        if main_blockers:
+            combined = main_blockers + main_reasons
+            results.append(
+                _hold_result(
+                    symbol,
+                    "; ".join(combined),
+                    overall,
+                    alignment,
+                    reasons=combined,
+                )
+            )
+
+        elif main_result is not None:
+            main_result.signal.reason = (
+                "MAIN SIGNAL | " + main_result.signal.reason
+            )
+            results.append(main_result)
+            main_signal_created = True
+
+        else:
+            results.append(
+                _hold_result(
+                    symbol,
+                    "MAIN signal tasdiqlanmadi: "
+                    + "; ".join(main_reasons),
+                    overall,
+                    alignment,
+                    reasons=main_reasons,
+                )
+            )
+
+    else:
+        results.append(
             _hold_result(
                 symbol,
                 "Katta timeframe'larda aniq yo'nalish yo'q",
                 overall,
                 alignment,
             )
-        ])
-
-    m15 = candles_by_timeframe["M15"]
-    m30 = candles_by_timeframe["M30"]
-    m30_indicators = calculate_indicators(m30)
-
-    results = []
-    main_blockers = []
-
-    if alignment < MINIMUM_ALIGNMENT:
-        main_blockers.append(
-            f"MTF alignment past: {alignment:.2f}%"
         )
 
-    if not mtf["higher_confirmation"]:
-        main_blockers.append("D1, H4 and H1 tasdig'i yetarli emas")
-
-    if not mtf["lower_confirmation"]:
-        main_blockers.append(
-            "M30 katta timeframe yo'nalishini tasdiqlamadi"
-        )
-
-    # MTF bloklasa ham M15 indikatorlarining diagnostikasi davom etadi.
-    main_result, main_reasons = _build_trade_result(
-        symbol=symbol,
-        direction=overall,
-        candles=m15,
-        m30_indicators=m30_indicators,
-        trend_label=overall,
-        strength=alignment,
-        timeframe_label="M15",
-    )
-
-    if main_blockers:
-        combined = main_blockers + main_reasons
-        results.append(
-            _hold_result(
-                symbol,
-                "; ".join(combined),
-                overall,
-                alignment,
-                reasons=combined,
-            )
-        )
-    elif main_result is not None:
-        main_result.signal.reason = (
-            "MAIN SIGNAL | " + main_result.signal.reason
-        )
-        results.append(main_result)
-    else:
-        results.append(
-            _hold_result(
-                symbol,
-                "MAIN signal tasdiqlanmadi: " + "; ".join(main_reasons),
-                overall,
-                alignment,
-                reasons=main_reasons,
-            )
-        )
-
-    m15_trend = analyze_single_timeframe(m15, "M15")
-    m30_trend = analyze_single_timeframe(m30, "M30")
-    local_direction = m15_trend["trend"]
-
-    counter_conditions = (
-        local_direction in ("BULLISH", "BEARISH")
-        and m30_trend["trend"] == local_direction
-        and local_direction != overall
-        and (m15_trend["adx"] or 0) >= COUNTER_MINIMUM_ADX
-        and (m30_trend["adx"] or 0) >= COUNTER_MINIMUM_ADX
-    )
-
-    if counter_conditions:
-        local_strength = min(
-            m15_trend["strength"],
-            m30_trend["strength"],
-        )
-
-        counter_result, counter_reasons = _build_trade_result(
+    # MAIN signal chiqmagan bo'lsa, M15/M30 mustaqil tekshiriladi.
+    # Katta timeframe noma'lum yoki qarama-qarshi bo'lsa ham
+    # qisqa muddatli yo'nalish alohida baholanadi.
+    if not main_signal_created:
+        short_term_result = _try_short_term_signal(
             symbol=symbol,
-            direction=local_direction,
-            candles=m15,
+            m15=m15,
+            m30=m30,
             m30_indicators=m30_indicators,
-            trend_label=f"COUNTER-TREND vs {overall}",
-            strength=local_strength,
-            timeframe_label="M15-CT",
+            overall=overall,
         )
 
-        if counter_result is not None:
-            counter_result.signal.reason = (
-                f"COUNTER-TREND SIGNAL | Katta trend: {overall} | "
-                + counter_result.signal.reason
-            )
-            results.append(counter_result)
+        if short_term_result is not None:
+            results.append(short_term_result)
 
     return AnalysisBatch(results)
