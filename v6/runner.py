@@ -1,3 +1,4 @@
+
 import base64
 import html
 import json
@@ -68,10 +69,7 @@ def validate_environment():
             "GITHUB_REPOSITORY": GITHUB_REPOSITORY,
         })
 
-    missing = [
-        name for name, value in required.items()
-        if not value
-    ]
+    missing = [name for name, value in required.items() if not value]
 
     if missing:
         raise RuntimeError(
@@ -99,9 +97,7 @@ def send_telegram(chat_id, message):
     result = response.json()
 
     if not result.get("ok"):
-        raise RuntimeError(
-            "Telegram API xatosi: " + str(result)
-        )
+        raise RuntimeError("Telegram API xatosi: " + str(result))
 
     return True
 
@@ -120,13 +116,8 @@ def run_telegram_self_test():
     logger.info("[TELEGRAM SELF TEST OK]")
 
     return {
-        "analyzed": 0,
-        "buy": 0,
-        "sell": 0,
-        "hold": 0,
-        "failed": 0,
-        "delivery_failed": 0,
-        "sent": 1,
+        "analyzed": 0, "buy": 0, "sell": 0, "hold": 0,
+        "failed": 0, "delivery_failed": 0, "sent": 1,
         "duplicates": 0,
     }
 
@@ -143,16 +134,13 @@ def get_users():
     users = payload.get("users", [])
 
     if not isinstance(users, list):
-        raise RuntimeError(
-            "Worker users ro'yxatini noto'g'ri qaytardi."
-        )
+        raise RuntimeError("Worker users ro'yxatini noto'g'ri qaytardi.")
 
     normalized = {
         str(user).strip()
         for user in users
         if user is not None and str(user).strip()
     }
-
     normalized.add(str(ADMIN_ID).strip())
 
     return sorted(normalized)
@@ -184,14 +172,9 @@ def validate_state(state):
 
     for key, record in signals.items():
         if not isinstance(key, str) or not isinstance(record, dict):
-            raise RuntimeError(
-                "V6 state ichida noto'g'ri signal yozuvi."
-            )
-
+            raise RuntimeError("V6 state ichida noto'g'ri signal yozuvi.")
         if not isinstance(record.get("delivered_to", []), list):
-            raise RuntimeError(
-                "delivered_to ro'yxati noto'g'ri."
-            )
+            raise RuntimeError("delivered_to ro'yxati noto'g'ri.")
 
     return state
 
@@ -214,9 +197,7 @@ def load_state():
         raw = base64.b64decode(data["content"]).decode("utf-8")
         state = json.loads(raw)
     except (KeyError, ValueError, UnicodeDecodeError) as exc:
-        raise RuntimeError(
-            "GitHub state faylini o'qib bo'lmadi."
-        ) from exc
+        raise RuntimeError("GitHub state faylini o'qib bo'lmadi.") from exc
 
     return validate_state(state), data["sha"]
 
@@ -224,12 +205,7 @@ def load_state():
 def save_state(state, sha):
     validate_state(state)
 
-    raw = json.dumps(
-        state,
-        ensure_ascii=False,
-        indent=2,
-    ).encode("utf-8")
-
+    raw = json.dumps(state, ensure_ascii=False, indent=2).encode("utf-8")
     payload = {
         "message": "Update V6 signal delivery state",
         "content": base64.b64encode(raw).decode("utf-8"),
@@ -245,17 +221,11 @@ def save_state(state, sha):
         json=payload,
         timeout=REQUEST_TIMEOUT,
     )
-
     response.raise_for_status()
 
-    new_sha = (
-        response.json().get("content") or {}
-    ).get("sha")
-
+    new_sha = (response.json().get("content") or {}).get("sha")
     if not new_sha:
-        raise RuntimeError(
-            "GitHub yangi state SHA qaytarmadi."
-        )
+        raise RuntimeError("GitHub yangi state SHA qaytarmadi.")
 
     return new_sha
 
@@ -268,8 +238,6 @@ def make_signal_key(result, candles_by_timeframe):
         raise RuntimeError("M15 shamlar ro'yxati bo'sh.")
 
     timestamp = candles[-1].timestamp
-
-    # MAIN va COUNTER-TREND mustaqil signal kalitlari.
     key = f"{signal.symbol}|{signal.timeframe}"
     signature = f"{timestamp}|{signal.side}"
 
@@ -285,13 +253,10 @@ def get_delivery_record(state, key, signature, users):
             for user in old.get("delivered_to", [])
             if str(user).strip()
         }
-
         return {
             "signature": signature,
             "target_users": list(users),
-            "delivered_to": sorted(
-                delivered.intersection(set(users))
-            ),
+            "delivered_to": sorted(delivered.intersection(set(users))),
         }
 
     return {
@@ -318,23 +283,17 @@ def format_price(symbol, value):
 def format_signal(result):
     signal = result.signal
     emoji = "🟢" if signal.side == "BUY" else "🔴"
-
-    signal_type = (
-        "COUNTER-TREND"
-        if "CT" in signal.timeframe
-        else "MAIN"
-    )
+    signal_type = "COUNTER-TREND" if "CT" in signal.timeframe else "MAIN"
 
     rr = (
         f"1:{signal.risk_reward:.2f}"
-        if signal.risk_reward is not None
+        if getattr(signal, "risk_reward", None) is not None
         else "N/A"
     )
 
     reason = html.escape(
-        signal.reason or "Tasdiqlangan texnik shartlar"
+        getattr(signal, "reason", "") or "Tasdiqlangan texnik shartlar"
     )
-
     confidence = getattr(signal, "confidence", 0.0) or 0.0
     strength = getattr(result, "strength", 0.0) or 0.0
 
@@ -360,42 +319,59 @@ def format_signal(result):
     )
 
 
-def format_public_signal(result):
+def get_public_entry_zone(result, candles_by_timeframe=None):
+    signal = result.signal
+    candles_by_timeframe = candles_by_timeframe or {}
+    candles = candles_by_timeframe.get("M15") or []
+
+    if candles:
+        candle = candles[-1]
+        candle_open = getattr(candle, "open", None)
+        candle_close = getattr(candle, "close", None)
+
+        if candle_open is not None and candle_close is not None:
+            low = min(float(candle_open), float(candle_close))
+            high = max(float(candle_open), float(candle_close))
+            return (
+                f"{format_price(signal.symbol, low)} – "
+                f"{format_price(signal.symbol, high)}"
+            )
+
+    entry = format_price(signal.symbol, signal.entry)
+    return f"{entry} – {entry}"
+
+
+def format_public_signal(result, candles_by_timeframe=None):
     signal = result.signal
     emoji = "🟢" if signal.side == "BUY" else "🔴"
+    entry_zone = get_public_entry_zone(result, candles_by_timeframe)
 
     return (
         f"{emoji} <b>{html.escape(signal.symbol)} "
         f"{html.escape(signal.side)}</b>\n"
-        f"Kirish: <code>{format_price(signal.symbol, signal.entry)}</code>\n"
+        f"Kirish zonasi: <code>{entry_zone}</code>\n"
         f"SL: <code>{format_price(signal.symbol, signal.stop_loss)}</code>\n"
         f"TP: <code>{format_price(signal.symbol, signal.take_profit)}</code>"
     )
 
 
-def format_signal_for_user(result, user_id):
+def format_signal_for_user(result, user_id, candles_by_timeframe=None):
     if str(user_id).strip() == str(ADMIN_ID).strip():
         return format_signal(result)
-
-    return format_public_signal(result)
+    return format_public_signal(result, candles_by_timeframe)
 
 
 def fetch_symbol_data(symbol):
     candles_by_timeframe = {}
 
     for timeframe in TIMEFRAMES:
-        logger.info(
-            "[DATA] %s %s yuklanmoqda",
-            symbol,
-            timeframe,
-        )
+        logger.info("[DATA] %s %s yuklanmoqda", symbol, timeframe)
 
         market = get_verified_market_data(
             symbol=symbol,
             timeframe=timeframe,
             limit=CANDLE_LIMIT,
         )
-
         candles = market.candles
 
         if len(candles) < MINIMUM_CANDLES:
@@ -413,10 +389,7 @@ def fetch_symbol_data(symbol):
 
         logger.info(
             "[DATA OK] %s %s | candles=%s | source=%s",
-            symbol,
-            timeframe,
-            len(candles),
-            candles[-1].source,
+            symbol, timeframe, len(candles), candles[-1].source,
         )
 
     return candles_by_timeframe
@@ -431,51 +404,31 @@ def analyze_one_symbol(symbol):
         logger.info(
             "[V6 RESULT] %s | %s | %s | trend=%s | "
             "strength=%.2f%% | %s",
-            symbol,
-            result.signal.timeframe,
-            result.signal.side,
-            result.trend,
-            result.strength,
-            result.signal.reason,
+            symbol, result.signal.timeframe, result.signal.side,
+            result.trend, result.strength, result.signal.reason,
         )
 
     return results, candles
 
 
 def _normalize_results(value):
-    """Eski bitta AnalysisResult va yangi ro'yxatni qabul qiladi."""
-
     if hasattr(value, "signal"):
         return [value]
-
     if isinstance(value, (list, tuple)):
         return list(value)
 
     try:
         return list(value)
     except TypeError as exc:
-        raise RuntimeError(
-            "Signal engine noto'g'ri natija qaytardi."
-        ) from exc
+        raise RuntimeError("Signal engine noto'g'ri natija qaytardi.") from exc
 
 
-def deliver_one_signal(
-    result,
-    candles,
-    state,
-    state_sha,
-    users,
-    stats,
-):
+def deliver_one_signal(result, candles, state, state_sha, users, stats):
     signal = result.signal
 
     if signal.side == "HOLD":
         stats["hold"] += 1
-        logger.info(
-            "[HOLD] %s | %s",
-            signal.symbol,
-            signal.reason,
-        )
+        logger.info("[HOLD] %s | %s", signal.symbol, signal.reason)
         return state_sha
 
     if signal.side == "BUY":
@@ -483,27 +436,13 @@ def deliver_one_signal(
     elif signal.side == "SELL":
         stats["sell"] += 1
     else:
-        raise RuntimeError(
-            f"Noma'lum signal: {signal.side}"
-        )
+        raise RuntimeError(f"Noma'lum signal: {signal.side}")
 
-    key, signature = make_signal_key(
-        result,
-        candles,
-    )
-
-    record = get_delivery_record(
-        state,
-        key,
-        signature,
-        users,
-    )
+    key, signature = make_signal_key(result, candles)
+    record = get_delivery_record(state, key, signature, users)
 
     if not TELEGRAM_ENABLED:
-        logger.info(
-            "[DRY RUN]\n%s",
-            format_signal(result),
-        )
+        logger.info("[DRY RUN]\n%s", format_signal(result))
         return state_sha
 
     pending = [
@@ -515,45 +454,29 @@ def deliver_one_signal(
         stats["duplicates"] += 1
         logger.info(
             "[DUPLICATE] %s %s %s",
-            signal.symbol,
-            signal.timeframe,
-            signal.side,
+            signal.symbol, signal.timeframe, signal.side,
         )
         return state_sha
 
     for user in pending:
         try:
-            message = format_signal_for_user(
-                result,
-                user,
-            )
-
+            message = format_signal_for_user(result, user, candles)
             if not send_telegram(user, message):
-                raise RuntimeError(
-                    "Telegram yuborishni tasdiqlamadi."
-                )
-
+                raise RuntimeError("Telegram yuborishni tasdiqlamadi.")
         except Exception:
             stats["delivery_failed"] += 1
             logger.exception(
                 "[TELEGRAM ERROR] %s %s -> %s",
-                signal.symbol,
-                signal.timeframe,
-                user,
+                signal.symbol, signal.timeframe, user,
             )
             continue
 
         record["delivered_to"].append(user)
-        record["delivered_to"] = sorted(
-            set(record["delivered_to"])
-        )
+        record["delivered_to"] = sorted(set(record["delivered_to"]))
         state["signals"][key] = record
 
         try:
-            state_sha = save_state(
-                state,
-                state_sha,
-            )
+            state_sha = save_state(state, state_sha)
         except Exception as exc:
             logger.exception("[STATE SAVE ERROR]")
             raise StatePersistenceError(
@@ -562,13 +485,9 @@ def deliver_one_signal(
             ) from exc
 
         stats["sent"] += 1
-
         logger.info(
             "[SENT] %s %s %s -> %s",
-            signal.symbol,
-            signal.timeframe,
-            signal.side,
-            user,
+            signal.symbol, signal.timeframe, signal.side, user,
         )
 
     return state_sha
@@ -591,23 +510,15 @@ def main():
     if TELEGRAM_ENABLED:
         state, state_sha = load_state()
         users = get_users()
-
         if not users:
-            raise RuntimeError(
-                "Tasdiqlangan foydalanuvchilar topilmadi."
-            )
+            raise RuntimeError("Tasdiqlangan foydalanuvchilar topilmadi.")
     else:
         state, state_sha = {"signals": {}}, None
         users = []
 
     stats = {
-        "analyzed": 0,
-        "buy": 0,
-        "sell": 0,
-        "hold": 0,
-        "failed": 0,
-        "delivery_failed": 0,
-        "sent": 0,
+        "analyzed": 0, "buy": 0, "sell": 0, "hold": 0,
+        "failed": 0, "delivery_failed": 0, "sent": 0,
         "duplicates": 0,
     }
 
@@ -617,41 +528,25 @@ def main():
         try:
             raw_results, candles = analyze_one_symbol(symbol)
             results = _normalize_results(raw_results)
-
             stats["analyzed"] += 1
 
             for result in results:
                 state_sha = deliver_one_signal(
-                    result,
-                    candles,
-                    state,
-                    state_sha,
-                    users,
-                    stats,
+                    result, candles, state, state_sha, users, stats
                 )
 
         except StatePersistenceError:
             raise
-
         except Exception:
             stats["failed"] += 1
-            logger.exception(
-                "[SYMBOL ERROR] %s",
-                symbol,
-            )
+            logger.exception("[SYMBOL ERROR] %s", symbol)
 
     if len(state["signals"]) > MAX_STORED_SIGNALS:
         state["signals"] = dict(
-            list(state["signals"].items())[
-                -MAX_STORED_SIGNALS:
-            ]
+            list(state["signals"].items())[-MAX_STORED_SIGNALS:]
         )
-
         if TELEGRAM_ENABLED:
-            state_sha = save_state(
-                state,
-                state_sha,
-            )
+            state_sha = save_state(state, state_sha)
 
     logger.info("=" * 60)
     logger.info("V6 YAKUNIY NATIJA: %s", stats)
@@ -662,10 +557,6 @@ def main():
 
 if __name__ == "__main__":
     final_stats = main()
-
-    if (
-        final_stats["failed"]
-        or final_stats["delivery_failed"]
-    ):
+    if final_stats["failed"] or final_stats["delivery_failed"]:
         logger.error("V6 xatoliklar bilan yakunlandi.")
         sys.exit(1)
