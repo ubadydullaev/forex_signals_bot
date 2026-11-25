@@ -62,7 +62,7 @@ class TestV6MTFAnalysis(unittest.TestCase):
         self.assertEqual(result["total_weight"], expected)
         self.assertEqual(result["alignment_percent"], 100.0)
 
-    def test_higher_timeframes_and_m30_confirm(self):
+    def test_all_bullish_gives_full_confirmation(self):
         result = self.run_with_trends({
             "D1": "BULLISH",
             "H4": "BULLISH",
@@ -74,7 +74,56 @@ class TestV6MTFAnalysis(unittest.TestCase):
         self.assertEqual(result["overall_trend"], "BULLISH")
         self.assertTrue(result["higher_confirmation"])
         self.assertTrue(result["lower_confirmation"])
+        self.assertEqual(result["higher_confirmations"], 3)
         self.assertEqual(result["alignment_percent"], 100.0)
+
+    def test_two_higher_timeframes_are_enough(self):
+        result = self.run_with_trends({
+            "D1": "BEARISH",
+            "H4": "RANGING",
+            "H1": "BEARISH",
+            "M30": "BEARISH",
+            "M15": "BULLISH",
+        })
+
+        self.assertEqual(result["overall_trend"], "BEARISH")
+        self.assertTrue(result["higher_confirmation"])
+        self.assertTrue(result["lower_confirmation"])
+        self.assertEqual(result["higher_confirmations"], 2)
+        self.assertEqual(result["alignment_percent"], 100.0)
+
+    def test_only_one_higher_timeframe_is_not_enough(self):
+        result = self.run_with_trends({
+            "D1": "BEARISH",
+            "H4": "RANGING",
+            "H1": "RANGING",
+            "M30": "BEARISH",
+            "M15": "BEARISH",
+        })
+
+        self.assertEqual(result["overall_trend"], "BEARISH")
+        self.assertFalse(result["higher_confirmation"])
+        self.assertTrue(result["lower_confirmation"])
+        self.assertEqual(result["higher_confirmations"], 1)
+
+    def test_opposite_direction_reduces_alignment(self):
+        result = self.run_with_trends({
+            "D1": "BULLISH",
+            "H4": "BULLISH",
+            "H1": "BEARISH",
+            "M30": "BULLISH",
+            "M15": "BULLISH",
+        })
+
+        self.assertEqual(result["overall_trend"], "BULLISH")
+        self.assertTrue(result["higher_confirmation"])
+        self.assertTrue(result["lower_confirmation"])
+
+        self.assertAlmostEqual(
+            result["alignment_percent"],
+            7.0 / 9.0 * 100.0,
+            places=2,
+        )
 
     def test_m30_opposition_prevents_lower_confirmation(self):
         result = self.run_with_trends({
@@ -95,16 +144,19 @@ class TestV6MTFAnalysis(unittest.TestCase):
             places=2,
         )
 
-    def test_higher_timeframe_disagreement_blocks_confirmation(self):
+    def test_ranging_timeframe_does_not_count_as_opposition(self):
         result = self.run_with_trends({
-            "D1": "BULLISH",
-            "H4": "BULLISH",
+            "D1": "BEARISH",
+            "H4": "RANGING",
             "H1": "BEARISH",
-            "M30": "BULLISH",
-            "M15": "BULLISH",
+            "M30": "BEARISH",
+            "M15": "UNKNOWN",
         })
 
-        self.assertFalse(result["higher_confirmation"])
+        self.assertEqual(result["overall_trend"], "BEARISH")
+        self.assertEqual(result["alignment_percent"], 100.0)
+        self.assertTrue(result["higher_confirmation"])
+        self.assertTrue(result["lower_confirmation"])
 
     def test_unknown_timeframe_does_not_inflate_alignment(self):
         result = self.run_with_trends({
@@ -116,6 +168,20 @@ class TestV6MTFAnalysis(unittest.TestCase):
         })
 
         self.assertEqual(result["alignment_percent"], 100.0)
+
+    def test_coverage_is_reported(self):
+        result = self.run_with_trends({
+            "D1": "BULLISH",
+            "H4": "RANGING",
+            "H1": "BULLISH",
+            "M30": "BULLISH",
+        })
+
+        self.assertAlmostEqual(
+            result["coverage_percent"],
+            6.0 / 9.0 * 100.0,
+            places=2,
+        )
 
     def test_all_unknown_returns_unknown(self):
         result = self.run_with_trends({})
