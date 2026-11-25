@@ -36,12 +36,18 @@ class TestV6SignalEngine(unittest.TestCase):
             for timeframe in TIMEFRAMES
         }
 
-    def make_mtf(self, trend="BULLISH", alignment=100.0):
+    def make_mtf(
+        self,
+        trend="BULLISH",
+        alignment=100.0,
+        higher=True,
+        lower=True,
+    ):
         return {
             "overall_trend": trend,
             "alignment_percent": alignment,
-            "higher_confirmation": True,
-            "lower_confirmation": True,
+            "higher_confirmation": higher,
+            "lower_confirmation": lower,
         }
 
     def make_indicators(
@@ -52,7 +58,9 @@ class TestV6SignalEngine(unittest.TestCase):
         atr_value=2.0,
     ):
         if rsi_value is None:
-            rsi_value = 60.0 if direction == "BULLISH" else 40.0
+            rsi_value = (
+                60.0 if direction == "BULLISH" else 40.0
+            )
 
         supertrend_direction = (
             1 if direction == "BULLISH" else -1
@@ -96,6 +104,8 @@ class TestV6SignalEngine(unittest.TestCase):
         alignment=100.0,
         indicators=None,
         structure=None,
+        higher=True,
+        lower=True,
     ):
         market_data = self.make_market_data()
 
@@ -105,10 +115,17 @@ class TestV6SignalEngine(unittest.TestCase):
         if structure is None:
             structure = self.make_structure(direction)
 
+        mtf = self.make_mtf(
+            direction,
+            alignment,
+            higher,
+            lower,
+        )
+
         with (
             patch(
                 "v6.signal_engine.analyze_mtf",
-                return_value=self.make_mtf(direction, alignment),
+                return_value=mtf,
             ),
             patch(
                 "v6.signal_engine.calculate_indicators",
@@ -127,17 +144,35 @@ class TestV6SignalEngine(unittest.TestCase):
         result = self.run_analysis("BULLISH")
 
         self.assertEqual(result.signal.side, "BUY")
-        self.assertLess(result.signal.stop_loss, result.signal.entry)
-        self.assertGreater(result.signal.take_profit, result.signal.entry)
-        self.assertGreaterEqual(result.signal.risk_reward, 1.5)
+        self.assertLess(
+            result.signal.stop_loss,
+            result.signal.entry,
+        )
+        self.assertGreater(
+            result.signal.take_profit,
+            result.signal.entry,
+        )
+        self.assertGreaterEqual(
+            result.signal.risk_reward,
+            1.5,
+        )
 
     def test_valid_bearish_conditions_generate_sell(self):
         result = self.run_analysis("BEARISH")
 
         self.assertEqual(result.signal.side, "SELL")
-        self.assertGreater(result.signal.stop_loss, result.signal.entry)
-        self.assertLess(result.signal.take_profit, result.signal.entry)
-        self.assertGreaterEqual(result.signal.risk_reward, 1.5)
+        self.assertGreater(
+            result.signal.stop_loss,
+            result.signal.entry,
+        )
+        self.assertLess(
+            result.signal.take_profit,
+            result.signal.entry,
+        )
+        self.assertGreaterEqual(
+            result.signal.risk_reward,
+            1.5,
+        )
 
     # DATA VALIDATION
 
@@ -166,30 +201,96 @@ class TestV6SignalEngine(unittest.TestCase):
         self.assertEqual(result.signal.side, "HOLD")
 
     def test_low_alignment_returns_hold(self):
-        result = self.run_analysis("BULLISH", alignment=70.0)
+        result = self.run_analysis(
+            "BULLISH",
+            alignment=70.0,
+        )
 
         self.assertEqual(result.signal.side, "HOLD")
-        self.assertIn("alignment", result.signal.reason.lower())
+        self.assertIn(
+            "alignment",
+            result.signal.reason.lower(),
+        )
 
     def test_higher_timeframe_disagreement_returns_hold(self):
-        market_data = self.make_market_data()
-        mtf = self.make_mtf()
-        mtf["higher_confirmation"] = False
-
-        with patch("v6.signal_engine.analyze_mtf", return_value=mtf):
-            result = analyze_symbol(self.SYMBOL, market_data)
+        result = self.run_analysis(
+            "BULLISH",
+            higher=False,
+        )
 
         self.assertEqual(result.signal.side, "HOLD")
+        self.assertIn(
+            "D1, H4 and H1",
+            result.signal.reason,
+        )
 
     def test_m30_disagreement_returns_hold(self):
-        market_data = self.make_market_data()
-        mtf = self.make_mtf()
-        mtf["lower_confirmation"] = False
-
-        with patch("v6.signal_engine.analyze_mtf", return_value=mtf):
-            result = analyze_symbol(self.SYMBOL, market_data)
+        result = self.run_analysis(
+            "BULLISH",
+            lower=False,
+        )
 
         self.assertEqual(result.signal.side, "HOLD")
+        self.assertIn("M30", result.signal.reason)
+
+    # ALL-BLOCKERS DIAGNOSTICS
+
+    def test_mtf_and_m15_blockers_are_reported_together(self):
+        indicators = self.make_indicators(
+            "BULLISH",
+            rsi_value=80.0,
+            adx_value=10.0,
+        )
+        indicators["supertrend"]["direction"] = [-1]
+        indicators["macd"] = {
+            "macd": [-2.0],
+            "signal": [-1.0],
+            "histogram": [-1.0],
+        }
+
+        structure = self.make_structure("UNKNOWN")
+
+        result = self.run_analysis(
+            "BULLISH",
+            alignment=70.0,
+            indicators=indicators,
+            structure=structure,
+            higher=False,
+            lower=False,
+        )
+
+        self.assertEqual(result.signal.side, "HOLD")
+
+        reason = result.signal.reason
+
+        self.assertIn("alignment", reason.lower())
+        self.assertIn("D1, H4 and H1", reason)
+        self.assertIn("M30", reason)
+        self.assertIn("Supertrend", reason)
+        self.assertIn("RSI", reason)
+        self.assertIn("ADX", reason)
+        self.assertIn("MACD", reason)
+        self.assertIn("BOS/CHOCH", reason)
+
+        self.assertGreaterEqual(len(result.reasons), 8)
+
+    def test_m15_diagnostics_run_even_when_m30_fails(self):
+        indicators = self.make_indicators(
+            "BULLISH",
+            rsi_value=80.0,
+            adx_value=12.0,
+        )
+
+        result = self.run_analysis(
+            "BULLISH",
+            indicators=indicators,
+            lower=False,
+        )
+
+        self.assertEqual(result.signal.side, "HOLD")
+        self.assertIn("M30", result.signal.reason)
+        self.assertIn("RSI", result.signal.reason)
+        self.assertIn("ADX", result.signal.reason)
 
     # M15 FILTERS
 
@@ -197,21 +298,36 @@ class TestV6SignalEngine(unittest.TestCase):
         indicators = self.make_indicators("BULLISH")
         indicators["supertrend"]["direction"] = [-1]
 
-        result = self.run_analysis("BULLISH", indicators=indicators)
+        result = self.run_analysis(
+            "BULLISH",
+            indicators=indicators,
+        )
 
         self.assertEqual(result.signal.side, "HOLD")
         self.assertIn("Supertrend", result.signal.reason)
 
     def test_invalid_buy_rsi_returns_hold(self):
-        indicators = self.make_indicators("BULLISH", rsi_value=80.0)
-        result = self.run_analysis("BULLISH", indicators=indicators)
+        indicators = self.make_indicators(
+            "BULLISH",
+            rsi_value=80.0,
+        )
+        result = self.run_analysis(
+            "BULLISH",
+            indicators=indicators,
+        )
 
         self.assertEqual(result.signal.side, "HOLD")
         self.assertIn("RSI", result.signal.reason)
 
     def test_invalid_sell_rsi_returns_hold(self):
-        indicators = self.make_indicators("BEARISH", rsi_value=20.0)
-        result = self.run_analysis("BEARISH", indicators=indicators)
+        indicators = self.make_indicators(
+            "BEARISH",
+            rsi_value=20.0,
+        )
+        result = self.run_analysis(
+            "BEARISH",
+            indicators=indicators,
+        )
 
         self.assertEqual(result.signal.side, "HOLD")
         self.assertIn("RSI", result.signal.reason)
@@ -219,21 +335,39 @@ class TestV6SignalEngine(unittest.TestCase):
     # ADX: minimum 15
 
     def test_adx_15_is_accepted(self):
-        indicators = self.make_indicators("BULLISH", adx_value=15.0)
-        result = self.run_analysis("BULLISH", indicators=indicators)
+        indicators = self.make_indicators(
+            "BULLISH",
+            adx_value=15.0,
+        )
+        result = self.run_analysis(
+            "BULLISH",
+            indicators=indicators,
+        )
 
         self.assertEqual(result.signal.side, "BUY")
 
     def test_adx_below_15_returns_hold(self):
-        indicators = self.make_indicators("BULLISH", adx_value=14.99)
-        result = self.run_analysis("BULLISH", indicators=indicators)
+        indicators = self.make_indicators(
+            "BULLISH",
+            adx_value=14.99,
+        )
+        result = self.run_analysis(
+            "BULLISH",
+            indicators=indicators,
+        )
 
         self.assertEqual(result.signal.side, "HOLD")
         self.assertIn("ADX", result.signal.reason)
 
     def test_missing_adx_returns_hold(self):
-        indicators = self.make_indicators("BULLISH", adx_value=None)
-        result = self.run_analysis("BULLISH", indicators=indicators)
+        indicators = self.make_indicators(
+            "BULLISH",
+            adx_value=None,
+        )
+        result = self.run_analysis(
+            "BULLISH",
+            indicators=indicators,
+        )
 
         self.assertEqual(result.signal.side, "HOLD")
         self.assertIn("ADX", result.signal.reason)
@@ -248,7 +382,10 @@ class TestV6SignalEngine(unittest.TestCase):
             "histogram": [-1.0],
         }
 
-        result = self.run_analysis("BULLISH", indicators=indicators)
+        result = self.run_analysis(
+            "BULLISH",
+            indicators=indicators,
+        )
 
         self.assertEqual(result.signal.side, "HOLD")
         self.assertIn("MACD", result.signal.reason)
@@ -261,11 +398,17 @@ class TestV6SignalEngine(unittest.TestCase):
             "histogram": [0.0],
         }
 
-        result = self.run_analysis("BULLISH", indicators=indicators)
+        result = self.run_analysis(
+            "BULLISH",
+            indicators=indicators,
+        )
 
         self.assertEqual(result.signal.side, "BUY")
         self.assertTrue(
-            any("MACD neutral" in reason for reason in result.reasons)
+            any(
+                "MACD neutral" in reason
+                for reason in result.reasons
+            )
         )
 
     def test_missing_macd_returns_hold(self):
@@ -276,7 +419,10 @@ class TestV6SignalEngine(unittest.TestCase):
             "histogram": [None],
         }
 
-        result = self.run_analysis("BULLISH", indicators=indicators)
+        result = self.run_analysis(
+            "BULLISH",
+            indicators=indicators,
+        )
 
         self.assertEqual(result.signal.side, "HOLD")
         self.assertIn("MACD", result.signal.reason)
@@ -284,15 +430,24 @@ class TestV6SignalEngine(unittest.TestCase):
     # OTHER FILTERS
 
     def test_missing_atr_returns_hold(self):
-        indicators = self.make_indicators("BULLISH", atr_value=None)
-        result = self.run_analysis("BULLISH", indicators=indicators)
+        indicators = self.make_indicators(
+            "BULLISH",
+            atr_value=None,
+        )
+        result = self.run_analysis(
+            "BULLISH",
+            indicators=indicators,
+        )
 
         self.assertEqual(result.signal.side, "HOLD")
         self.assertIn("ATR", result.signal.reason)
 
     def test_market_structure_without_confirmation_returns_hold(self):
         structure = self.make_structure("UNKNOWN")
-        result = self.run_analysis("BULLISH", structure=structure)
+        result = self.run_analysis(
+            "BULLISH",
+            structure=structure,
+        )
 
         self.assertEqual(result.signal.side, "HOLD")
         self.assertIn("BOS/CHOCH", result.signal.reason)
@@ -300,13 +455,10 @@ class TestV6SignalEngine(unittest.TestCase):
     # DIRECT DIRECTION CHECKS
 
     def test_direction_check_rejects_unknown_direction(self):
-        indicators = self.make_indicators("BULLISH")
-        structure = self.make_structure("BULLISH")
-
         confirmed, reasons = _check_direction(
             "UNKNOWN",
-            indicators,
-            structure,
+            self.make_indicators("BULLISH"),
+            self.make_structure("BULLISH"),
             self.make_candles(),
         )
 
@@ -334,6 +486,36 @@ class TestV6SignalEngine(unittest.TestCase):
 
         self.assertTrue(confirmed)
         self.assertTrue(reasons)
+
+    def test_direction_check_collects_multiple_m15_failures(self):
+        indicators = self.make_indicators(
+            "BULLISH",
+            rsi_value=80.0,
+            adx_value=10.0,
+        )
+        indicators["supertrend"]["direction"] = [-1]
+        indicators["macd"] = {
+            "macd": [-2.0],
+            "signal": [-1.0],
+            "histogram": [-1.0],
+        }
+
+        confirmed, reasons = _check_direction(
+            "BULLISH",
+            indicators,
+            self.make_structure("UNKNOWN"),
+            self.make_candles(),
+        )
+
+        self.assertFalse(confirmed)
+        joined = "; ".join(reasons)
+
+        self.assertIn("Supertrend", joined)
+        self.assertIn("RSI", joined)
+        self.assertIn("ADX", joined)
+        self.assertIn("MACD", joined)
+        self.assertIn("BOS/CHOCH", joined)
+        self.assertGreaterEqual(len(reasons), 5)
 
 
 if __name__ == "__main__":
