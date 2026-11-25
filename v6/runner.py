@@ -1,4 +1,3 @@
-
 import base64
 import html
 import json
@@ -10,10 +9,7 @@ import requests
 
 from .config import SYMBOLS, TIMEFRAMES
 from .data_pipeline import get_verified_market_data
-from .indicators import calculate_indicators
-from .market_structure import analyze_market_structure
-from .mtf_analysis import analyze_single_timeframe
-from .signal_engine import analyze_symbol, _analyze_macd_momentum
+from .signal_engine import analyze_symbol
 
 
 VERSION = "V6"
@@ -51,7 +47,7 @@ logger = logging.getLogger("V6")
 
 
 class StatePersistenceError(RuntimeError):
-    """Signal yuborildi, ammo yuborish holati saqlanmadi."""
+    pass
 
 
 def validate_environment():
@@ -74,10 +70,7 @@ def validate_environment():
             "GITHUB_REPOSITORY": GITHUB_REPOSITORY,
         }
 
-    missing = [
-        name for name, value in required.items()
-        if not value
-    ]
+    missing = [name for name, value in required.items() if not value]
 
     if missing:
         raise RuntimeError(
@@ -105,40 +98,23 @@ def send_telegram(chat_id, message):
     result = response.json()
 
     if not result.get("ok"):
-        raise RuntimeError(
-            "Telegram API xatosi: " + str(result)
-        )
+        raise RuntimeError("Telegram API xatosi: " + str(result))
 
     return True
 
 
 def run_telegram_self_test():
-    if not TELEGRAM_ENABLED:
-        raise RuntimeError(
-            "Telegram self-test uchun Telegram yoqilgan bo'lishi kerak."
-        )
-
-    if not ADMIN_ID:
-        raise RuntimeError("TELEGRAM_CHAT_ID mavjud emas.")
-
     message = (
         "✅ <b>FOREX SIGNALS V6 — TELEGRAM TEST</b>\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        "Bot Telegram API bilan muvaffaqiyatli bog'landi.\n"
-        "Admin chatiga test xabari yetkazildi.\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        "<i>Bu diagnostika xabari. Savdo signali emas.</i>"
+        "Bot Telegram API bilan bog'landi.\n"
+        "Bu test xabari, savdo signali emas."
     )
 
-    sent = send_telegram(ADMIN_ID, message)
-
-    if not sent:
+    if not send_telegram(ADMIN_ID, message):
         raise RuntimeError("Telegram test xabari yuborilmadi.")
 
-    logger.info(
-        "[TELEGRAM SELF TEST OK] Test faqat admin chatiga yuborildi."
-    )
-
+    logger.info("[TELEGRAM SELF TEST OK]")
     return {
         "analyzed": 0,
         "buy": 0,
@@ -152,11 +128,6 @@ def run_telegram_self_test():
 
 
 def get_users():
-    if not WORKER_URL or not WEBHOOK_SECRET or not ADMIN_ID:
-        raise RuntimeError(
-            "Worker yoki admin sozlamalari yetishmaydi."
-        )
-
     response = session.get(
         f"{WORKER_URL}/approved-users",
         headers={"X-Worker-Secret": WEBHOOK_SECRET},
@@ -168,9 +139,7 @@ def get_users():
     users = payload.get("users", [])
 
     if not isinstance(users, list):
-        raise RuntimeError(
-            "Worker users ro'yxatini noto'g'ri qaytardi."
-        )
+        raise RuntimeError("Worker users ro'yxatini noto'g'ri qaytardi.")
 
     normalized = {
         str(user).strip()
@@ -179,7 +148,6 @@ def get_users():
     }
 
     normalized.add(str(ADMIN_ID).strip())
-
     return sorted(normalized)
 
 
@@ -209,26 +177,15 @@ def validate_state(state):
 
     for key, record in signals.items():
         if not isinstance(key, str) or not isinstance(record, dict):
-            raise RuntimeError(
-                "V6 state ichida noto'g'ri signal yozuvi."
-            )
+            raise RuntimeError("V6 state ichida noto'g'ri signal yozuvi.")
 
-        delivered = record.get("delivered_to", [])
-
-        if not isinstance(delivered, list):
-            raise RuntimeError(
-                "delivered_to ro'yxati noto'g'ri."
-            )
+        if not isinstance(record.get("delivered_to", []), list):
+            raise RuntimeError("delivered_to ro'yxati noto'g'ri.")
 
     return state
 
 
 def load_state():
-    if not GITHUB_TOKEN or not GITHUB_REPOSITORY:
-        raise RuntimeError(
-            "GitHub state sozlamalari yetishmaydi."
-        )
-
     response = session.get(
         state_url(),
         headers=github_headers(),
@@ -246,9 +203,7 @@ def load_state():
         raw = base64.b64decode(data["content"]).decode("utf-8")
         state = json.loads(raw)
     except (KeyError, ValueError, UnicodeDecodeError) as exc:
-        raise RuntimeError(
-            "GitHub state faylini o'qib bo'lmadi."
-        ) from exc
+        raise RuntimeError("GitHub state faylini o'qib bo'lmadi.") from exc
 
     return validate_state(state), data["sha"]
 
@@ -279,13 +234,10 @@ def save_state(state, sha):
     )
 
     response.raise_for_status()
-    result = response.json()
-    new_sha = (result.get("content") or {}).get("sha")
+    new_sha = (response.json().get("content") or {}).get("sha")
 
     if not new_sha:
-        raise RuntimeError(
-            "GitHub yangi state SHA qaytarmadi."
-        )
+        raise RuntimeError("GitHub yangi state SHA qaytarmadi.")
 
     return new_sha
 
@@ -299,10 +251,11 @@ def make_signal_key(result, candles_by_timeframe):
 
     timestamp = candles[-1].timestamp
 
-    return (
-        f"{signal.symbol}|{signal.timeframe}",
-        f"{timestamp}|{signal.side}",
-    )
+    # M15 va M15-CT alohida kalitga ega bo'ladi.
+    key = f"{signal.symbol}|{signal.timeframe}"
+    signature = f"{timestamp}|{signal.side}"
+
+    return key, signature
 
 
 def get_delivery_record(state, key, signature, users):
@@ -310,9 +263,6 @@ def get_delivery_record(state, key, signature, users):
 
     if isinstance(old, dict) and old.get("signature") == signature:
         delivered = old.get("delivered_to", [])
-
-        if not isinstance(delivered, list):
-            delivered = []
 
         delivered = {
             str(user).strip()
@@ -323,9 +273,7 @@ def get_delivery_record(state, key, signature, users):
         return {
             "signature": signature,
             "target_users": list(users),
-            "delivered_to": sorted(
-                delivered.intersection(set(users))
-            ),
+            "delivered_to": sorted(delivered.intersection(set(users))),
         }
 
     return {
@@ -350,10 +298,14 @@ def format_price(symbol, value):
 
 
 def format_signal(result):
-    """Admin uchun to'liq signal."""
     signal = result.signal
-
     emoji = "🟢" if signal.side == "BUY" else "🔴"
+
+    signal_type = (
+        "COUNTER-TREND"
+        if "CT" in signal.timeframe
+        else "MAIN"
+    )
 
     rr = (
         f"1:{signal.risk_reward:.2f}"
@@ -367,11 +319,11 @@ def format_signal(result):
 
     return (
         f"{emoji} <b>FOREX SIGNALS {VERSION}</b>\n"
+        f"Signal turi: <b>{signal_type}</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"Instrument: <b>{html.escape(signal.symbol)}</b>\n"
-        f"Yo'nalish: <b>{html.escape(signal.side)}</b>\n"
+        f"Yo'nalish: <b>{signal.side}</b>\n"
         f"Timeframe: <b>{html.escape(signal.timeframe)}</b>\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
         f"Entry: <code>{format_price(signal.symbol, signal.entry)}</code>\n"
         f"Stop Loss: <code>{format_price(signal.symbol, signal.stop_loss)}</code>\n"
         f"Take Profit: <code>{format_price(signal.symbol, signal.take_profit)}</code>\n"
@@ -383,83 +335,35 @@ def format_signal(result):
         f"━━━━━━━━━━━━━━━━━━\n"
         f"<b>Tasdiqlar:</b>\n{reason}\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"<i>V6 avtomatik tahlili. Bu foyda kafolati emas.</i>"
+        f"<i>V6 avtomatik tahlili. Foyda kafolati emas.</i>"
     )
 
 
-def get_public_entry_zone(result, candles_by_timeframe=None):
-    """Do'stlar uchun kirish zonasi."""
-    signal = result.signal
-    candles_by_timeframe = candles_by_timeframe or {}
-    m15_candles = candles_by_timeframe.get("M15", [])
-
-    if m15_candles:
-        last_candle = m15_candles[-1]
-        open_price = getattr(last_candle, "open", None)
-        close_price = getattr(last_candle, "close", None)
-
-        if open_price is not None and close_price is not None:
-            try:
-                zone_low = min(float(open_price), float(close_price))
-                zone_high = max(float(open_price), float(close_price))
-
-                return (
-                    f"{format_price(signal.symbol, zone_low)} – "
-                    f"{format_price(signal.symbol, zone_high)}"
-                )
-            except (TypeError, ValueError):
-                pass
-
-    if signal.entry is None:
-        return "N/A"
-
-    price = format_price(signal.symbol, signal.entry)
-    return f"{price} – {price}"
-
-
-def format_public_signal(result, candles_by_timeframe=None):
-    """Do'stlar uchun faqat BUY/SELL, kirish zonasi, SL va TP."""
+def format_public_signal(result):
     signal = result.signal
     emoji = "🟢" if signal.side == "BUY" else "🔴"
-
-    entry_zone = get_public_entry_zone(
-        result,
-        candles_by_timeframe,
-    )
 
     return (
         f"{emoji} <b>{html.escape(signal.symbol)} "
         f"{html.escape(signal.side)}</b>\n"
-        f"Kirish zonasi: <code>{entry_zone}</code>\n"
+        f"Kirish: <code>{format_price(signal.symbol, signal.entry)}</code>\n"
         f"SL: <code>{format_price(signal.symbol, signal.stop_loss)}</code>\n"
         f"TP: <code>{format_price(signal.symbol, signal.take_profit)}</code>"
     )
 
 
-def format_signal_for_user(
-    result,
-    user_id,
-    candles_by_timeframe=None,
-):
-    """Admin va boshqa foydalanuvchilar uchun alohida format."""
+def format_signal_for_user(result, user_id):
     if str(user_id).strip() == str(ADMIN_ID).strip():
         return format_signal(result)
 
-    return format_public_signal(
-        result,
-        candles_by_timeframe,
-    )
+    return format_public_signal(result)
 
 
 def fetch_symbol_data(symbol):
     candles_by_timeframe = {}
 
     for timeframe in TIMEFRAMES:
-        logger.info(
-            "[DATA] %s %s yuklanmoqda",
-            symbol,
-            timeframe,
-        )
+        logger.info("[DATA] %s %s yuklanmoqda", symbol, timeframe)
 
         market = get_verified_market_data(
             symbol=symbol,
@@ -472,7 +376,7 @@ def fetch_symbol_data(symbol):
         if len(candles) < MINIMUM_CANDLES:
             raise RuntimeError(
                 f"{symbol} {timeframe}: shamlar yetarli emas "
-                f"({len(candles)}), talab: {MINIMUM_CANDLES}"
+                f"({len(candles)}/{MINIMUM_CANDLES})"
             )
 
         if not all(candle.is_closed for candle in candles):
@@ -493,223 +397,107 @@ def fetch_symbol_data(symbol):
     return candles_by_timeframe
 
 
-def _fmt_metric(value, digits=2):
-    if value is None:
-        return "N/A"
-    return f"{float(value):.{digits}f}"
+def analyze_one_symbol(symbol):
+    candles = fetch_symbol_data(symbol)
+    results = analyze_symbol(symbol, candles)
 
-
-def log_timeframe_analysis(candles_by_timeframe):
-    """
-    MACD diagnostikasi signal engine bilan bir xil 4 qiymatli
-    momentum algoritmidan foydalanadi.
-    """
-    for timeframe in TIMEFRAMES:
-        candles = candles_by_timeframe.get(timeframe, [])
-
-        result = analyze_single_timeframe(
-            candles,
-            timeframe,
+    for result in results:
+        logger.info(
+            "[V6 RESULT] %s | %s | %s | trend=%s | strength=%.2f%% | %s",
+            symbol,
+            result.signal.timeframe,
+            result.signal.side,
+            result.trend,
+            result.strength,
+            result.signal.reason,
         )
 
-        macd_main = None
-        macd_signal = None
-        macd_hist = None
-        histogram_sequence = []
-        macd_state = "UNAVAILABLE"
-        momentum_state = "N/A"
-        momentum_reason = "MACD qiymatlari mavjud emas"
+    return results, candles
+
+
+def deliver_one_signal(result, candles, state, state_sha, users, stats):
+    signal = result.signal
+
+    if signal.side == "HOLD":
+        stats["hold"] += 1
+        logger.info("[HOLD] %s | %s", signal.symbol, signal.reason)
+        return state_sha
+
+    if signal.side == "BUY":
+        stats["buy"] += 1
+    elif signal.side == "SELL":
+        stats["sell"] += 1
+    else:
+        raise RuntimeError(f"Noma'lum signal: {signal.side}")
+
+    key, signature = make_signal_key(result, candles)
+
+    record = get_delivery_record(
+        state,
+        key,
+        signature,
+        users,
+    )
+
+    if not TELEGRAM_ENABLED:
+        logger.info("[DRY RUN]\n%s", format_signal(result))
+        return state_sha
+
+    pending = [
+        user for user in record["target_users"]
+        if user not in record["delivered_to"]
+    ]
+
+    if not pending:
+        stats["duplicates"] += 1
+        logger.info(
+            "[DUPLICATE] %s %s %s",
+            signal.symbol,
+            signal.timeframe,
+            signal.side,
+        )
+        return state_sha
+
+    for user in pending:
+        try:
+            message = format_signal_for_user(result, user)
+
+            if not send_telegram(user, message):
+                raise RuntimeError("Telegram yuborishni tasdiqlamadi.")
+
+        except Exception:
+            stats["delivery_failed"] += 1
+            logger.exception(
+                "[TELEGRAM ERROR] %s %s -> %s",
+                signal.symbol,
+                signal.timeframe,
+                user,
+            )
+            continue
+
+        record["delivered_to"].append(user)
+        record["delivered_to"] = sorted(set(record["delivered_to"]))
+        state["signals"][key] = record
 
         try:
-            if candles:
-                indicators = calculate_indicators(candles)
-                macd_data = indicators["macd"]
-
-                main_values = macd_data["macd"]
-                signal_values = macd_data["signal"]
-                hist_values = macd_data["histogram"]
-
-                length = min(
-                    len(main_values),
-                    len(signal_values),
-                    len(hist_values),
-                )
-
-                rows = []
-
-                for i in range(length):
-                    main = main_values[i]
-                    signal = signal_values[i]
-                    hist = hist_values[i]
-
-                    if main is None or signal is None or hist is None:
-                        continue
-
-                    rows.append((
-                        float(main),
-                        float(signal),
-                        float(hist),
-                    ))
-
-                if rows:
-                    macd_main, macd_signal, macd_hist = rows[-1]
-
-                    histogram_sequence = [
-                        round(row[2], 8)
-                        for row in rows[-4:]
-                    ]
-
-                    if macd_main > macd_signal and macd_hist > 0:
-                        macd_state = "BULLISH"
-                    elif macd_main < macd_signal and macd_hist < 0:
-                        macd_state = "BEARISH"
-                    else:
-                        macd_state = "NEUTRAL"
-
-                    trend = result["trend"]
-
-                    if trend in ("BULLISH", "BEARISH"):
-                        momentum_state, momentum_reason = (
-                            _analyze_macd_momentum(
-                                macd_data,
-                                trend,
-                            )
-                        )
-                    else:
-                        momentum_state = "NO_DIRECTION"
-                        momentum_reason = (
-                            "Timeframe yo'nalishi aniq emas"
-                        )
-
+            state_sha = save_state(state, state_sha)
         except Exception as exc:
-            momentum_reason = str(exc)
-            logger.warning(
-                "[MACD DIAGNOSTIC ERROR] %s | %s",
-                timeframe,
-                exc,
-            )
+            logger.exception("[STATE SAVE ERROR]")
+            raise StatePersistenceError(
+                "Signal yuborildi, lekin state saqlanmadi. "
+                "Takroriy yuborish xavfi sabab runner to'xtatildi."
+            ) from exc
 
+        stats["sent"] += 1
         logger.info(
-            "[TIMEFRAME ANALYSIS] %s | trend=%s | ADX=%s | RSI=%s | "
-            "EMA20=%s | EMA50=%s | EMA200=%s | Supertrend=%s | "
-            "structure=%s | MACD=%s | MACD_LINE=%s | "
-            "MACD_SIGNAL=%s | HIST=%s | HIST_LAST4=%s | "
-            "MOMENTUM_STATE=%s | MOMENTUM_REASON=%s | reasons=%s",
-            timeframe,
-            result["trend"],
-            _fmt_metric(result["adx"]),
-            _fmt_metric(result["rsi"]),
-            _fmt_metric(result["ema_20"], 5),
-            _fmt_metric(result["ema_50"], 5),
-            _fmt_metric(result["ema_200"], 5),
-            result["supertrend_direction"],
-            result["structure_trend"],
-            macd_state,
-            _fmt_metric(macd_main, 6),
-            _fmt_metric(macd_signal, 6),
-            _fmt_metric(macd_hist, 6),
-            histogram_sequence,
-            momentum_state,
-            momentum_reason,
-            "; ".join(result["reasons"]),
+            "[SENT] %s %s %s -> %s",
+            signal.symbol,
+            signal.timeframe,
+            signal.side,
+            user,
         )
 
-
-def log_structure_diagnostics(symbol, candles):
-    """BOS/CHOCH hodisalarini oxirgi 12 ta M15 sham bilan solishtiradi."""
-    if not candles:
-        logger.warning(
-            "[STRUCTURE DIAGNOSTIC] %s | M15 shamlar mavjud emas",
-            symbol,
-        )
-        return
-
-    try:
-        structure = analyze_market_structure(candles)
-
-        recent_candles = candles[-12:]
-        recent_timestamps = {
-            candle.timestamp for candle in recent_candles
-        }
-
-        recent_events = [
-            event for event in structure["events"]
-            if event.timestamp in recent_timestamps
-        ]
-
-        recent_sweeps = [
-            sweep for sweep in structure["liquidity_sweeps"]
-            if sweep.timestamp in recent_timestamps
-        ]
-
-        event_details = [
-            {
-                "type": event.event,
-                "direction": event.direction,
-                "timestamp": event.timestamp,
-                "price": event.price,
-                "level": event.level,
-            }
-            for event in recent_events
-        ]
-
-        sweep_details = [
-            {
-                "direction": sweep.direction,
-                "timestamp": sweep.timestamp,
-                "level": sweep.swept_level,
-                "close": sweep.close,
-            }
-            for sweep in recent_sweeps
-        ]
-
-        logger.info(
-            "[STRUCTURE DIAGNOSTIC] %s | trend=%s | "
-            "swings=%s | total_events=%s | recent_events=%s | "
-            "recent_sweeps=%s | last_12_first_ts=%s | "
-            "last_candle_ts=%s",
-            symbol,
-            structure["trend"],
-            len(structure["swings"]),
-            len(structure["events"]),
-            event_details,
-            sweep_details,
-            recent_candles[0].timestamp,
-            candles[-1].timestamp,
-        )
-
-    except Exception:
-        logger.exception(
-            "[STRUCTURE DIAGNOSTIC ERROR] %s",
-            symbol,
-        )
-
-
-def analyze_one_symbol(symbol):
-    candles_by_timeframe = fetch_symbol_data(symbol)
-
-    log_timeframe_analysis(candles_by_timeframe)
-
-    log_structure_diagnostics(
-        symbol,
-        candles_by_timeframe.get("M15", []),
-    )
-
-    result = analyze_symbol(
-        symbol=symbol,
-        candles_by_timeframe=candles_by_timeframe,
-    )
-
-    logger.info(
-        "[V6 RESULT] %s | %s | trend=%s | strength=%.2f%% | %s",
-        symbol,
-        result.signal.side,
-        result.trend,
-        result.strength,
-        result.signal.reason,
-    )
-
-    return result, candles_by_timeframe
+    return state_sha
 
 
 def main():
@@ -719,7 +507,7 @@ def main():
         return run_telegram_self_test()
 
     logger.info("=" * 60)
-    logger.info("V6 UNIFIED RUNNER ISHGA TUSHDI")
+    logger.info("V6 TWO-DIRECTION SIGNAL ENGINE ISHGA TUSHDI")
     logger.info("Instrumentlar: %s", SYMBOLS)
     logger.info("Timeframes: %s", TIMEFRAMES)
     logger.info("Shamlar soni: %s", CANDLE_LIMIT)
@@ -731,9 +519,7 @@ def main():
         users = get_users()
 
         if not users:
-            raise RuntimeError(
-                "Tasdiqlangan foydalanuvchilar topilmadi."
-            )
+            raise RuntimeError("Tasdiqlangan foydalanuvchilar topilmadi.")
     else:
         state, state_sha = {"signals": {}}, None
         users = []
@@ -753,110 +539,18 @@ def main():
         logger.info("[SYMBOL START] %s", symbol)
 
         try:
-            result, candles_by_timeframe = analyze_one_symbol(symbol)
+            results, candles = analyze_one_symbol(symbol)
             stats["analyzed"] += 1
 
-            signal = result.signal
-
-            if signal.side == "HOLD":
-                stats["hold"] += 1
-                logger.info(
-                    "[HOLD] %s | %s",
-                    symbol,
-                    signal.reason,
-                )
-                continue
-
-            if signal.side == "BUY":
-                stats["buy"] += 1
-            elif signal.side == "SELL":
-                stats["sell"] += 1
-            else:
-                raise RuntimeError(
-                    f"Noma'lum signal yo'nalishi: {signal.side}"
-                )
-
-            key, signature = make_signal_key(
-                result,
-                candles_by_timeframe,
-            )
-
-            record = get_delivery_record(
-                state,
-                key,
-                signature,
-                users,
-            )
-
-            if not TELEGRAM_ENABLED:
-                logger.info(
-                    "[DRY RUN]\n%s",
-                    format_signal(result),
-                )
-                continue
-
-            pending_users = [
-                user
-                for user in record["target_users"]
-                if user not in record["delivered_to"]
-            ]
-
-            if not pending_users:
-                stats["duplicates"] += 1
-                logger.info(
-                    "[DUPLICATE] %s %s",
-                    symbol,
-                    signal.side,
-                )
-                continue
-
-            for user in pending_users:
-                try:
-                    message = format_signal_for_user(
-                        result,
-                        user,
-                        candles_by_timeframe,
-                    )
-
-                    if not send_telegram(user, message):
-                        raise RuntimeError(
-                            "Telegram yuborishni tasdiqlamadi."
-                        )
-
-                except Exception:
-                    stats["delivery_failed"] += 1
-                    logger.exception(
-                        "[TELEGRAM ERROR] %s -> %s",
-                        symbol,
-                        user,
-                    )
-                    continue
-
-                record["delivered_to"].append(user)
-                record["delivered_to"] = sorted(
-                    set(record["delivered_to"])
-                )
-
-                state["signals"][key] = record
-
-                try:
-                    state_sha = save_state(state, state_sha)
-
-                except Exception as exc:
-                    logger.exception("[STATE SAVE ERROR]")
-
-                    raise StatePersistenceError(
-                        "Signal yuborildi, lekin state saqlanmadi. "
-                        "Takroriy yuborish xavfi sabab runner to'xtatildi."
-                    ) from exc
-
-                stats["sent"] += 1
-
-                logger.info(
-                    "[SENT] %s %s -> %s",
-                    symbol,
-                    signal.side,
-                    user,
+            # Bitta instrumentdan MAIN va COUNTER signallari alohida yuboriladi.
+            for result in results:
+                state_sha = deliver_one_signal(
+                    result,
+                    candles,
+                    state,
+                    state_sha,
+                    users,
+                    stats,
                 )
 
         except StatePersistenceError:
@@ -871,7 +565,8 @@ def main():
             list(state["signals"].items())[-MAX_STORED_SIGNALS:]
         )
 
-        state_sha = save_state(state, state_sha)
+        if TELEGRAM_ENABLED:
+            state_sha = save_state(state, state_sha)
 
     logger.info("=" * 60)
     logger.info("V6 YAKUNIY NATIJA: %s", stats)
