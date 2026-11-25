@@ -22,12 +22,7 @@ def _is_finite_number(value) -> bool:
 # MARKET DATA VALIDATION
 # ==========================================
 
-def validate_market_data(
-    candles,
-    minimum_candles: int = 200,
-) -> ValidationResult:
-    """Validate closed candles and normalized market data."""
-
+def validate_market_data(candles, minimum_candles: int = 200):
     reasons = []
 
     if not candles:
@@ -39,8 +34,7 @@ def validate_market_data(
         or minimum_candles < 1
     ):
         return ValidationResult(
-            False,
-            ["Minimum candle count must be a positive integer"],
+            False, ["Minimum candle count must be a positive integer"]
         )
 
     if len(candles) < minimum_candles:
@@ -51,18 +45,11 @@ def validate_market_data(
     timestamps = []
 
     for i, candle in enumerate(candles):
-
-        # Closed candle check
         if not isinstance(candle.is_closed, bool):
-            reasons.append(
-                f"Invalid candle closed status at candle {i}"
-            )
+            reasons.append(f"Invalid candle closed status at candle {i}")
         elif not candle.is_closed:
-            reasons.append(
-                f"Unclosed candle found at candle {i}"
-            )
+            reasons.append(f"Unclosed candle found at candle {i}")
 
-        # Data source check
         if (
             not isinstance(candle.source, str)
             or not candle.source.strip()
@@ -72,7 +59,6 @@ def validate_market_data(
                 f"Missing or unknown data source at candle {i}"
             )
 
-        # UTC milliseconds timestamp check
         timestamp = candle.timestamp
 
         if (
@@ -86,13 +72,9 @@ def validate_market_data(
         else:
             timestamps.append(timestamp)
 
-        # OHLCV numeric validation
         values = (
-            candle.open,
-            candle.high,
-            candle.low,
-            candle.close,
-            candle.volume,
+            candle.open, candle.high, candle.low,
+            candle.close, candle.volume,
         )
 
         if not all(_is_finite_number(value) for value in values):
@@ -101,102 +83,59 @@ def validate_market_data(
             )
             continue
 
-        if min(
-            candle.open,
-            candle.high,
-            candle.low,
-            candle.close,
-        ) <= 0:
-            reasons.append(
-                f"Prices must be positive at candle {i}"
-            )
+        if min(candle.open, candle.high, candle.low, candle.close) <= 0:
+            reasons.append(f"Prices must be positive at candle {i}")
 
         if candle.high < candle.low:
-            reasons.append(
-                f"High is below low at candle {i}"
-            )
+            reasons.append(f"High is below low at candle {i}")
 
-        if (
-            candle.high < candle.open
-            or candle.high < candle.close
-        ):
+        if candle.high < candle.open or candle.high < candle.close:
             reasons.append(
                 f"High is below open or close at candle {i}"
             )
 
-        if (
-            candle.low > candle.open
-            or candle.low > candle.close
-        ):
+        if candle.low > candle.open or candle.low > candle.close:
             reasons.append(
                 f"Low is above open or close at candle {i}"
             )
 
         if candle.volume < 0:
-            reasons.append(
-                f"Negative volume at candle {i}"
-            )
+            reasons.append(f"Negative volume at candle {i}")
 
-    # Timestamp order and duplicate checks
     if len(timestamps) == len(candles):
         if timestamps != sorted(timestamps):
-            reasons.append(
-                "Candle timestamps are not chronological"
-            )
+            reasons.append("Candle timestamps are not chronological")
 
         if len(timestamps) != len(set(timestamps)):
-            reasons.append(
-                "Duplicate candle timestamps found"
-            )
+            reasons.append("Duplicate candle timestamps found")
 
-    return ValidationResult(
-        valid=len(reasons) == 0,
-        reasons=reasons,
-    )
+    return ValidationResult(not reasons, reasons)
 
 
 # ==========================================
 # STOP LOSS VALIDATION
 # ==========================================
 
-def validate_stop_loss(
-    side: str,
-    entry: float,
-    stop_loss: float,
-) -> ValidationResult:
-    """Check stop-loss placement."""
-
-    if (
-        not _is_finite_number(entry)
-        or not _is_finite_number(stop_loss)
-    ):
+def validate_stop_loss(side, entry, stop_loss):
+    if not all(_is_finite_number(x) for x in (entry, stop_loss)):
         return ValidationResult(
-            False,
-            ["Entry and stop-loss must be finite numbers"],
+            False, ["Entry and stop-loss must be finite numbers"]
         )
 
     if entry <= 0 or stop_loss <= 0:
-        return ValidationResult(
-            False,
-            ["Prices must be positive"],
-        )
+        return ValidationResult(False, ["Prices must be positive"])
 
     if side not in ("BUY", "SELL"):
-        return ValidationResult(
-            False,
-            ["Side must be BUY or SELL"],
-        )
+        return ValidationResult(False, ["Side must be BUY or SELL"])
 
     if side == "BUY" and stop_loss >= entry:
         return ValidationResult(
-            False,
-            ["BUY stop-loss must be below entry"],
+            False, ["BUY stop-loss must be below entry"]
         )
 
     if side == "SELL" and stop_loss <= entry:
         return ValidationResult(
-            False,
-            ["SELL stop-loss must be above entry"],
+            False, ["SELL stop-loss must be above entry"]
         )
 
     return ValidationResult(True, [])
@@ -206,44 +145,26 @@ def validate_stop_loss(
 # TAKE PROFIT VALIDATION
 # ==========================================
 
-def validate_take_profit(
-    side: str,
-    entry: float,
-    take_profit: float,
-) -> ValidationResult:
-    """Check take-profit placement."""
-
-    if (
-        not _is_finite_number(entry)
-        or not _is_finite_number(take_profit)
-    ):
+def validate_take_profit(side, entry, take_profit):
+    if not all(_is_finite_number(x) for x in (entry, take_profit)):
         return ValidationResult(
-            False,
-            ["Entry and take-profit must be finite numbers"],
+            False, ["Entry and take-profit must be finite numbers"]
         )
 
     if entry <= 0 or take_profit <= 0:
-        return ValidationResult(
-            False,
-            ["Prices must be positive"],
-        )
+        return ValidationResult(False, ["Prices must be positive"])
 
     if side not in ("BUY", "SELL"):
-        return ValidationResult(
-            False,
-            ["Side must be BUY or SELL"],
-        )
+        return ValidationResult(False, ["Side must be BUY or SELL"])
 
     if side == "BUY" and take_profit <= entry:
         return ValidationResult(
-            False,
-            ["BUY take-profit must be above entry"],
+            False, ["BUY take-profit must be above entry"]
         )
 
     if side == "SELL" and take_profit >= entry:
         return ValidationResult(
-            False,
-            ["SELL take-profit must be below entry"],
+            False, ["SELL take-profit must be below entry"]
         )
 
     return ValidationResult(True, [])
@@ -254,16 +175,11 @@ def validate_take_profit(
 # ==========================================
 
 def calculate_risk_reward(
-    side: str,
-    entry: float,
-    stop_loss: float,
-    take_profit: float,
+    side, entry, stop_loss, take_profit
 ) -> Optional[float]:
-    """Calculate reward-to-risk ratio."""
-
     if not all(
-        _is_finite_number(value)
-        for value in (entry, stop_loss, take_profit)
+        _is_finite_number(x)
+        for x in (entry, stop_loss, take_profit)
     ):
         return None
 
@@ -273,11 +189,9 @@ def calculate_risk_reward(
     if side == "BUY":
         risk = entry - stop_loss
         reward = take_profit - entry
-
     elif side == "SELL":
         risk = stop_loss - entry
         reward = entry - take_profit
-
     else:
         return None
 
@@ -286,55 +200,57 @@ def calculate_risk_reward(
 
     result = reward / risk
 
-    if not math.isfinite(result):
-        return None
-
-    return result
+    return result if math.isfinite(result) else None
 
 
 def validate_risk_reward(
-    side: str,
-    entry: float,
-    stop_loss: float,
-    take_profit: float,
+    side,
+    entry,
+    stop_loss,
+    take_profit,
     minimum_rr: float = 1.5,
-) -> ValidationResult:
-    """Reject trades with insufficient reward-to-risk."""
-
+):
     if (
         not _is_finite_number(minimum_rr)
         or minimum_rr <= 0
     ):
         return ValidationResult(
-            False,
-            ["Minimum risk/reward must be positive"],
+            False, ["Minimum risk/reward must be positive"]
         )
 
     rr = calculate_risk_reward(
-        side,
-        entry,
-        stop_loss,
-        take_profit,
+        side, entry, stop_loss, take_profit
     )
 
     if rr is None:
         return ValidationResult(
-            False,
-            ["Unable to calculate valid risk/reward"],
+            False, ["Unable to calculate valid risk/reward"]
         )
 
-    if rr < minimum_rr:
+    # Floating-point aniqlik xatosi:
+    # 1.4999999999999998 qiymati 1.50 bilan teng deb olinadi.
+    # Haqiqatan past RR qiymatlari baribir rad etiladi.
+    meets_minimum = (
+        rr >= minimum_rr
+        or math.isclose(
+            rr,
+            minimum_rr,
+            rel_tol=1e-10,
+            abs_tol=1e-12,
+        )
+    )
+
+    if not meets_minimum:
         return ValidationResult(
             False,
             [
-                f"Risk/reward too low: {rr:.2f}; "
-                f"minimum required: {minimum_rr:.2f}"
+                f"Risk/reward too low: {rr:.6f}; "
+                f"minimum required: {minimum_rr:.6f}"
             ],
         )
 
     return ValidationResult(
-        True,
-        [f"Risk/reward accepted: {rr:.2f}"],
+        True, [f"Risk/reward accepted: {rr:.4f}"]
     )
 
 
@@ -343,59 +259,42 @@ def validate_risk_reward(
 # ==========================================
 
 def validate_atr_distance(
-    side: str,
-    entry: float,
-    stop_loss: float,
-    atr_value: float,
+    side,
+    entry,
+    stop_loss,
+    atr_value,
     minimum_atr: float = 0.5,
     maximum_atr: float = 3.0,
-) -> ValidationResult:
-    """Check stop-loss distance relative to ATR."""
-
+):
     if not all(
-        _is_finite_number(value)
-        for value in (
-            entry,
-            stop_loss,
-            atr_value,
-            minimum_atr,
-            maximum_atr,
+        _is_finite_number(x)
+        for x in (
+            entry, stop_loss, atr_value,
+            minimum_atr, maximum_atr,
         )
     ):
         return ValidationResult(
-            False,
-            ["ATR validation values must be finite numbers"],
+            False, ["ATR validation values must be finite numbers"]
         )
 
     if entry <= 0 or stop_loss <= 0:
         return ValidationResult(
-            False,
-            ["Entry and stop-loss must be positive"],
+            False, ["Entry and stop-loss must be positive"]
         )
 
     if atr_value <= 0:
-        return ValidationResult(
-            False,
-            ["ATR must be positive"],
-        )
+        return ValidationResult(False, ["ATR must be positive"])
 
     if side not in ("BUY", "SELL"):
-        return ValidationResult(
-            False,
-            ["Side must be BUY or SELL"],
-        )
+        return ValidationResult(False, ["Side must be BUY or SELL"])
 
     if minimum_atr < 0 or maximum_atr <= minimum_atr:
         return ValidationResult(
-            False,
-            ["Invalid ATR distance limits"],
+            False, ["Invalid ATR distance limits"]
         )
 
-    # Also verify correct stop-loss side
     stop_validation = validate_stop_loss(
-        side,
-        entry,
-        stop_loss,
+        side, entry, stop_loss
     )
 
     if not stop_validation.valid:
@@ -406,19 +305,16 @@ def validate_atr_distance(
 
     if atr_multiple < minimum_atr:
         return ValidationResult(
-            False,
-            [f"Stop-loss too tight: {atr_multiple:.2f} ATR"],
+            False, [f"Stop-loss too tight: {atr_multiple:.2f} ATR"]
         )
 
     if atr_multiple > maximum_atr:
         return ValidationResult(
-            False,
-            [f"Stop-loss too wide: {atr_multiple:.2f} ATR"],
+            False, [f"Stop-loss too wide: {atr_multiple:.2f} ATR"]
         )
 
     return ValidationResult(
-        True,
-        [f"Stop-loss distance accepted: {atr_multiple:.2f} ATR"],
+        True, [f"Stop-loss distance accepted: {atr_multiple:.2f} ATR"]
     )
 
 
@@ -427,38 +323,21 @@ def validate_atr_distance(
 # ==========================================
 
 def validate_trade(
-    side: str,
-    entry: float,
-    stop_loss: float,
-    take_profit: float,
-    atr_value: float,
+    side,
+    entry,
+    stop_loss,
+    take_profit,
+    atr_value,
     minimum_rr: float = 1.5,
-) -> ValidationResult:
-    """Run all trade-level validation checks."""
-
+):
     results = [
-        validate_stop_loss(
-            side,
-            entry,
-            stop_loss,
-        ),
-        validate_take_profit(
-            side,
-            entry,
-            take_profit,
-        ),
+        validate_stop_loss(side, entry, stop_loss),
+        validate_take_profit(side, entry, take_profit),
         validate_risk_reward(
-            side,
-            entry,
-            stop_loss,
-            take_profit,
-            minimum_rr,
+            side, entry, stop_loss, take_profit, minimum_rr
         ),
         validate_atr_distance(
-            side,
-            entry,
-            stop_loss,
-            atr_value,
+            side, entry, stop_loss, atr_value
         ),
     ]
 
