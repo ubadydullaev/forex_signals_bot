@@ -1,4 +1,3 @@
-
 from typing import Optional
 
 from .config import TIMEFRAMES
@@ -6,19 +5,12 @@ from .models import Candle, Signal, AnalysisResult
 from .indicators import calculate_indicators
 from .market_structure import analyze_market_structure
 from .mtf_analysis import analyze_mtf
-from .validators import (
-    validate_market_data,
-    validate_trade,
-)
+from .validators import validate_market_data, validate_trade
 
-
-# ==========================================
-# V6 SIGNAL ENGINE
-# ==========================================
 
 MINIMUM_CANDLES = 200
 MINIMUM_ALIGNMENT = 80.0
-MINIMUM_ADX = 18.0
+MINIMUM_ADX = 15.0
 MINIMUM_RR = 1.5
 STOP_ATR_MULTIPLIER = 1.5
 RECENT_STRUCTURE_CANDLES = 3
@@ -31,11 +23,7 @@ def _last_valid(values) -> Optional[float]:
     return None
 
 
-def _hold_signal(
-    symbol: str,
-    reason: str,
-    timeframe: str = "M15",
-) -> Signal:
+def _hold_signal(symbol, reason, timeframe="M15"):
     return Signal(
         symbol=symbol,
         timeframe=timeframe,
@@ -45,12 +33,12 @@ def _hold_signal(
 
 
 def _hold_result(
-    symbol: str,
-    reason: str,
-    trend: str = "UNKNOWN",
-    strength: float = 0.0,
-    reasons: Optional[tuple[str, ...]] = None,
-) -> AnalysisResult:
+    symbol,
+    reason,
+    trend="UNKNOWN",
+    strength=0.0,
+    reasons=None,
+):
     signal = _hold_signal(symbol, reason)
 
     return AnalysisResult(
@@ -63,7 +51,7 @@ def _hold_result(
     )
 
 
-def _get_macd_direction(macd_data: dict) -> str:
+def _get_macd_direction(macd_data):
     macd_line = _last_valid(macd_data["macd"])
     signal_line = _last_valid(macd_data["signal"])
     histogram = _last_valid(macd_data["histogram"])
@@ -85,12 +73,11 @@ def _get_macd_direction(macd_data: dict) -> str:
 
 
 def _check_direction(
-    direction: str,
-    m15_indicators: dict,
-    structure: dict,
-    m15_candles: list[Candle],
-) -> tuple[bool, list[str]]:
-
+    direction,
+    m15_indicators,
+    structure,
+    m15_candles,
+):
     reasons = []
 
     if direction not in ("BULLISH", "BEARISH"):
@@ -116,7 +103,7 @@ def _check_direction(
         m15_indicators["macd"]
     )
 
-    # Supertrend
+    # Supertrend — majburiy
     if supertrend_direction != expected_supertrend:
         return False, [
             "M15 Supertrend does not confirm direction"
@@ -124,7 +111,7 @@ def _check_direction(
 
     reasons.append("M15 Supertrend confirmed")
 
-    # RSI
+    # RSI — avvalgi chegaralar saqlanadi
     if rsi_value is None:
         return False, ["RSI data unavailable"]
 
@@ -137,17 +124,24 @@ def _check_direction(
 
     reasons.append(f"RSI confirmation: {rsi_value:.2f}")
 
-    # ADX
+    # ADX — yangi minimum 15
     if adx_value is None or adx_value < MINIMUM_ADX:
         return False, ["ADX trend strength is insufficient"]
 
     reasons.append(f"ADX confirmation: {adx_value:.2f}")
 
-    # MACD
-    if macd_direction != direction:
-        return False, ["MACD does not confirm direction"]
+    # MACD — neytral holatga ruxsat,
+    # qarama-qarshi yo'nalish esa taqiqlanadi.
+    if macd_direction == "UNKNOWN":
+        return False, ["MACD data unavailable"]
 
-    reasons.append("MACD confirmed")
+    if macd_direction not in (direction, "NEUTRAL"):
+        return False, ["MACD opposes signal direction"]
+
+    if macd_direction == direction:
+        reasons.append("MACD confirmed")
+    else:
+        reasons.append("MACD neutral — accepted")
 
     # Market structure
     structure_trend = structure["trend"]
@@ -176,7 +170,7 @@ def _check_direction(
 
         reasons.append("Recent BOS/CHOCH confirmed")
 
-    # Liquidity sweep is optional additional evidence.
+    # Liquidity sweep — qo'shimcha dalil
     recent_timestamps = {
         candle.timestamp
         for candle in m15_candles[-RECENT_STRUCTURE_CANDLES:]
@@ -201,15 +195,8 @@ def analyze_symbol(
     symbol: str,
     candles_by_timeframe: dict[str, list[Candle]],
 ) -> AnalysisResult:
-    """
-    Analyze one symbol using all configured timeframes.
 
-    Only fully closed candles should be passed to this function.
-    This engine is the only V6 component that decides BUY/SELL/HOLD.
-    It does not fetch market data or send Telegram messages.
-    """
-
-    # 1. Validate every configured timeframe.
+    # 1. Ma'lumotlarni tekshirish
     for timeframe in TIMEFRAMES:
         candles = candles_by_timeframe.get(timeframe, [])
 
@@ -229,7 +216,7 @@ def analyze_symbol(
                 reason=reason,
             )
 
-    # 2. Multi-timeframe analysis.
+    # 2. MTF tahlil
     mtf = analyze_mtf(candles_by_timeframe)
 
     overall_trend = mtf["overall_trend"]
@@ -246,7 +233,8 @@ def analyze_symbol(
     if alignment < MINIMUM_ALIGNMENT:
         reason = (
             f"MTF alignment too low: "
-            f"{alignment:.2f}% (minimum {MINIMUM_ALIGNMENT:.2f}%)"
+            f"{alignment:.2f}% "
+            f"(minimum {MINIMUM_ALIGNMENT:.2f}%)"
         )
 
         return _hold_result(
@@ -264,6 +252,7 @@ def analyze_symbol(
             strength=alignment,
         )
 
+    # M30 tasdig'i majburiy qoladi
     if not mtf["lower_confirmation"]:
         return _hold_result(
             symbol,
@@ -272,7 +261,7 @@ def analyze_symbol(
             strength=alignment,
         )
 
-    # 3. M15 indicators and market structure.
+    # 3. M15 indikatorlar
     m15_candles = candles_by_timeframe["M15"]
 
     indicators = calculate_indicators(m15_candles)
@@ -281,7 +270,7 @@ def analyze_symbol(
     direction = overall_trend
     side = "BUY" if direction == "BULLISH" else "SELL"
 
-    # 4. M15 entry confirmations.
+    # 4. M15 tasdiqlari
     confirmed, confirmation_reasons = _check_direction(
         direction=direction,
         m15_indicators=indicators,
@@ -300,7 +289,7 @@ def analyze_symbol(
             reasons=tuple(confirmation_reasons),
         )
 
-    # 5. Entry, stop loss and take profit.
+    # 5. Entry, SL va TP — o'zgarishsiz
     latest_candle = m15_candles[-1]
     entry = latest_candle.close
 
@@ -323,7 +312,7 @@ def analyze_symbol(
         stop_loss = entry + stop_distance
         take_profit = entry - stop_distance * MINIMUM_RR
 
-    # 6. Validate the proposed trade.
+    # 6. Savdo tekshiruvi
     validation = validate_trade(
         side=side,
         entry=entry,
@@ -344,7 +333,7 @@ def analyze_symbol(
             reasons=tuple(validation.reasons),
         )
 
-    # 7. Confidence is a technical score, not win probability.
+    # 7. Ishonchlilik ko'rsatkichi
     adx_for_confidence = (
         _last_valid(indicators["adx"]["adx"]) or 0.0
     )
@@ -355,7 +344,7 @@ def analyze_symbol(
         + min(adx_for_confidence, 50.0) * 0.6,
     )
 
-    # 8. Final signal.
+    # 8. Yakuniy signal
     signal = Signal(
         symbol=symbol,
         timeframe="M15",
