@@ -86,7 +86,7 @@ class TestV6MacdMomentum(unittest.TestCase):
 
         self.assertEqual(state, "OPPOSING_STRENGTHENING")
 
-    def test_opposite_macd_unclear_momentum_is_not_accepted(self):
+    def test_small_change_is_unclear(self):
         macd = make_macd(
             [-3.0, -2.0, -2.5, -2.0],
             "BEARISH",
@@ -150,6 +150,14 @@ class TestV6MacdMomentum(unittest.TestCase):
 
         self.assertEqual(state, "OPPOSING_UNCLEAR")
 
+    def test_malformed_macd_is_unknown(self):
+        state, _ = _analyze_macd_momentum(
+            {"macd": None, "signal": [], "histogram": []},
+            "BULLISH",
+        )
+
+        self.assertEqual(state, "UNKNOWN")
+
 
 class TestV6M30Momentum(unittest.TestCase):
 
@@ -201,6 +209,26 @@ class TestV6M30Momentum(unittest.TestCase):
         self.assertTrue(
             any("M30" in reason and "susaymoqda" in reason
                 for reason in reasons)
+        )
+
+    def test_m30_small_opposite_change_blocks_signal(self):
+        m30 = make_indicators()
+        m30["macd"] = make_macd(
+            [-3.0, -2.0, -2.5, -2.0],
+            "BEARISH",
+        )
+
+        confirmed, reasons = _check_direction(
+            "BULLISH",
+            make_indicators(),
+            self.structure,
+            self.candles,
+            m30_indicators=m30,
+        )
+
+        self.assertFalse(confirmed)
+        self.assertTrue(
+            any("M30" in reason for reason in reasons)
         )
 
 
