@@ -8,11 +8,12 @@ import sys
 
 import requests
 
-from .indicators import calculate_indicators
 from .config import SYMBOLS, TIMEFRAMES
 from .data_pipeline import get_verified_market_data
+from .indicators import calculate_indicators
+from .market_structure import analyze_market_structure
 from .mtf_analysis import analyze_single_timeframe
-from .signal_engine import analyze_symbol
+from .signal_engine import analyze_symbol, _analyze_macd_momentum
 
 
 VERSION = "V6"
@@ -386,14 +387,8 @@ def format_signal(result):
     )
 
 
-
 def get_public_entry_zone(result, candles_by_timeframe=None):
-    """
-    Do'stlar uchun kirish zonasi.
-    M15 shamida open/close bo'lsa, sham tanasidan foydalanadi.
-    Ular mavjud bo'lmasa, signal entry narxiga qaytadi.
-    Signalning entry/SL/TP hisoblari o'zgarmaydi.
-    """
+    """Do'stlar uchun kirish zonasi."""
     signal = result.signal
     candles_by_timeframe = candles_by_timeframe or {}
     m15_candles = candles_by_timeframe.get("M15", [])
@@ -422,11 +417,11 @@ def get_public_entry_zone(result, candles_by_timeframe=None):
     return f"{price} – {price}"
 
 
-
 def format_public_signal(result, candles_by_timeframe=None):
     """Do'stlar uchun faqat BUY/SELL, kirish zonasi, SL va TP."""
     signal = result.signal
     emoji = "🟢" if signal.side == "BUY" else "🔴"
+
     entry_zone = get_public_entry_zone(
         result,
         candles_by_timeframe,
@@ -504,9 +499,11 @@ def _fmt_metric(value, digits=2):
     return f"{float(value):.{digits}f}"
 
 
-
 def log_timeframe_analysis(candles_by_timeframe):
-    """Har bir timeframe trendi va MACD momentumini logga yozadi."""
+    """
+    MACD diagnostikasi signal engine bilan bir xil 4 qiymatli
+    momentum algoritmidan foydalanadi.
+    """
     for timeframe in TIMEFRAMES:
         candles = candles_by_timeframe.get(timeframe, [])
 
@@ -518,31 +515,49 @@ def log_timeframe_analysis(candles_by_timeframe):
         macd_main = None
         macd_signal = None
         macd_hist = None
-        macd_previous = None
+        histogram_sequence = []
         macd_state = "UNAVAILABLE"
+        momentum_state = "N/A"
+        momentum_reason = "MACD qiymatlari mavjud emas"
 
         try:
             if candles:
                 indicators = calculate_indicators(candles)
                 macd_data = indicators["macd"]
 
-                main_values = [
-                    x for x in macd_data["macd"] if x is not None
-                ]
-                signal_values = [
-                    x for x in macd_data["signal"] if x is not None
-                ]
-                hist_values = [
-                    x for x in macd_data["histogram"] if x is not None
-                ]
+                main_values = macd_data["macd"]
+                signal_values = macd_data["signal"]
+                hist_values = macd_data["histogram"]
 
-                if main_values and signal_values and hist_values:
-                    macd_main = main_values[-1]
-                    macd_signal = signal_values[-1]
-                    macd_hist = hist_values[-1]
+                length = min(
+                    len(main_values),
+                    len(signal_values),
+                    len(hist_values),
+                )
 
-                    if len(hist_values) >= 2:
-                        macd_previous = hist_values[-2]
+                rows = []
+
+                for i in range(length):
+                    main = main_values[i]
+                    signal = signal_values[i]
+                    hist = hist_values[i]
+
+                    if main is None or signal is None or hist is None:
+                        continue
+
+                    rows.append((
+                        float(main),
+                        float(signal),
+                        float(hist),
+                    ))
+
+                if rows:
+                    macd_main, macd_signal, macd_hist = rows[-1]
+
+                    histogram_sequence = [
+                        round(row[2], 8)
+                        for row in rows[-4:]
+                    ]
 
                     if macd_main > macd_signal and macd_hist > 0:
                         macd_state = "BULLISH"
@@ -551,32 +566,35 @@ def log_timeframe_analysis(candles_by_timeframe):
                     else:
                         macd_state = "NEUTRAL"
 
+                    trend = result["trend"]
+
+                    if trend in ("BULLISH", "BEARISH"):
+                        momentum_state, momentum_reason = (
+                            _analyze_macd_momentum(
+                                macd_data,
+                                trend,
+                            )
+                        )
+                    else:
+                        momentum_state = "NO_DIRECTION"
+                        momentum_reason = (
+                            "Timeframe yo'nalishi aniq emas"
+                        )
+
         except Exception as exc:
+            momentum_reason = str(exc)
             logger.warning(
                 "[MACD DIAGNOSTIC ERROR] %s | %s",
                 timeframe,
                 exc,
             )
 
-        momentum = "N/A"
-
-        if macd_hist is not None and macd_previous is not None:
-            current_abs = abs(macd_hist)
-            previous_abs = abs(macd_previous)
-
-            if current_abs < previous_abs:
-                momentum = "WEAKENING"
-            elif current_abs > previous_abs:
-                momentum = "STRENGTHENING"
-            else:
-                momentum = "FLAT"
-
         logger.info(
             "[TIMEFRAME ANALYSIS] %s | trend=%s | ADX=%s | RSI=%s | "
             "EMA20=%s | EMA50=%s | EMA200=%s | Supertrend=%s | "
             "structure=%s | MACD=%s | MACD_LINE=%s | "
-            "MACD_SIGNAL=%s | HIST=%s | PREV_HIST=%s | "
-            "MOMENTUM=%s | reasons=%s",
+            "MACD_SIGNAL=%s | HIST=%s | HIST_LAST4=%s | "
+            "MOMENTUM_STATE=%s | MOMENTUM_REASON=%s | reasons=%s",
             timeframe,
             result["trend"],
             _fmt_metric(result["adx"]),
@@ -590,16 +608,92 @@ def log_timeframe_analysis(candles_by_timeframe):
             _fmt_metric(macd_main, 6),
             _fmt_metric(macd_signal, 6),
             _fmt_metric(macd_hist, 6),
-            _fmt_metric(macd_previous, 6),
-            momentum,
+            histogram_sequence,
+            momentum_state,
+            momentum_reason,
             "; ".join(result["reasons"]),
         )
 
 
+def log_structure_diagnostics(symbol, candles):
+    """BOS/CHOCH hodisalarini oxirgi 12 ta M15 sham bilan solishtiradi."""
+    if not candles:
+        logger.warning(
+            "[STRUCTURE DIAGNOSTIC] %s | M15 shamlar mavjud emas",
+            symbol,
+        )
+        return
+
+    try:
+        structure = analyze_market_structure(candles)
+
+        recent_candles = candles[-12:]
+        recent_timestamps = {
+            candle.timestamp for candle in recent_candles
+        }
+
+        recent_events = [
+            event for event in structure["events"]
+            if event.timestamp in recent_timestamps
+        ]
+
+        recent_sweeps = [
+            sweep for sweep in structure["liquidity_sweeps"]
+            if sweep.timestamp in recent_timestamps
+        ]
+
+        event_details = [
+            {
+                "type": event.event,
+                "direction": event.direction,
+                "timestamp": event.timestamp,
+                "price": event.price,
+                "level": event.level,
+            }
+            for event in recent_events
+        ]
+
+        sweep_details = [
+            {
+                "direction": sweep.direction,
+                "timestamp": sweep.timestamp,
+                "level": sweep.swept_level,
+                "close": sweep.close,
+            }
+            for sweep in recent_sweeps
+        ]
+
+        logger.info(
+            "[STRUCTURE DIAGNOSTIC] %s | trend=%s | "
+            "swings=%s | total_events=%s | recent_events=%s | "
+            "recent_sweeps=%s | last_12_first_ts=%s | "
+            "last_candle_ts=%s",
+            symbol,
+            structure["trend"],
+            len(structure["swings"]),
+            len(structure["events"]),
+            event_details,
+            sweep_details,
+            recent_candles[0].timestamp,
+            candles[-1].timestamp,
+        )
+
+    except Exception:
+        logger.exception(
+            "[STRUCTURE DIAGNOSTIC ERROR] %s",
+            symbol,
+        )
+
 
 def analyze_one_symbol(symbol):
     candles_by_timeframe = fetch_symbol_data(symbol)
+
     log_timeframe_analysis(candles_by_timeframe)
+
+    log_structure_diagnostics(
+        symbol,
+        candles_by_timeframe.get("M15", []),
+    )
 
     result = analyze_symbol(
         symbol=symbol,
