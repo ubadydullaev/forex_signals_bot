@@ -1,7 +1,7 @@
 from typing import Optional
 
 from .config import TIMEFRAMES
-from .models import Candle, Signal, AnalysisResult
+from .models import Signal, AnalysisResult
 from .indicators import calculate_indicators
 from .market_structure import analyze_market_structure
 from .mtf_analysis import analyze_mtf, analyze_single_timeframe
@@ -11,6 +11,7 @@ from .validators import validate_market_data, validate_trade
 MINIMUM_CANDLES = 200
 MINIMUM_ALIGNMENT = 80.0
 MINIMUM_ADX = 15.0
+COUNTER_MINIMUM_ADX = 18.0
 MINIMUM_RR = 1.5
 STOP_ATR_MULTIPLIER = 1.5
 
@@ -21,13 +22,61 @@ MACD_MOMENTUM_BARS = 4
 MACD_MOMENTUM_CHANGE_THRESHOLD = 0.12
 MINIMUM_ENTRY_CONFIRMATIONS = 3
 
-COUNTER_MINIMUM_ADX = 18.0
+
+class AnalysisBatch:
+    """Bir nechta natijani saqlaydi va eski .signal interfeysini qo'llaydi."""
+
+    def __init__(self, results):
+        self.results = tuple(results)
+        if not self.results:
+            raise ValueError("AnalysisBatch bo'sh bo'lishi mumkin emas")
+
+    @property
+    def signal(self):
+        return self.results[0].signal
+
+    @property
+    def trend(self):
+        return self.results[0].trend
+
+    @property
+    def strength(self):
+        return self.results[0].strength
+
+    @property
+    def reasons(self):
+        return self.results[0].reasons
+
+    @property
+    def symbol(self):
+        return self.results[0].symbol
+
+    @property
+    def timeframe(self):
+        return self.results[0].timeframe
+
+    def __iter__(self):
+        return iter(self.results)
+
+    def __len__(self):
+        return len(self.results)
+
+    def __getitem__(self, index):
+        return self.results[index]
 
 
 def _last_valid(values) -> Optional[float]:
+    if not isinstance(values, (list, tuple)):
+        return None
+
     for value in reversed(values):
-        if value is not None:
+        if value is None:
+            continue
+        try:
             return float(value)
+        except (TypeError, ValueError):
+            continue
+
     return None
 
 
@@ -52,9 +101,9 @@ def _macd_values(macd_data):
         return []
 
     arrays = (
-        macd_data.get("macd", []),
-        macd_data.get("signal", []),
-        macd_data.get("histogram", []),
+        macd_data.get("macd"),
+        macd_data.get("signal"),
+        macd_data.get("histogram"),
     )
 
     if not all(isinstance(x, (list, tuple)) for x in arrays):
@@ -63,10 +112,11 @@ def _macd_values(macd_data):
     length = min(len(x) for x in arrays)
     rows = []
 
-    for i in range(length):
+    for index in range(length):
         try:
-            values = tuple(float(x[i]) for x in arrays)
-            rows.append(values)
+            values = tuple(float(x[index]) for x in arrays)
+            if all(value == value for value in values):
+                rows.append(values)
         except (TypeError, ValueError):
             continue
 
@@ -86,15 +136,19 @@ def _analyze_macd_momentum(macd_data, direction):
     elif main < signal and histogram < 0:
         macd_direction = "BEARISH"
     else:
-        return "NEUTRAL", "MACD neytral"
+        return "NEUTRAL", "MACD neutral"
 
     if macd_direction == direction:
         return "ALIGNED", "MACD yo'nalishni tasdiqladi"
 
     if len(rows) < MACD_MOMENTUM_BARS:
-        return "OPPOSING_UNCLEAR", "MACD qarama-qarshi, qiymatlar yetarli emas"
+        return "OPPOSING_UNCLEAR", "MACD qarama-qarshi, momentum uchun shamlar yetarli emas"
 
-    magnitudes = [abs(row[2]) for row in rows[-MACD_MOMENTUM_BARS:]]
+    magnitudes = [
+        abs(row[2])
+        for row in rows[-MACD_MOMENTUM_BARS:]
+    ]
+
     previous = (magnitudes[0] + magnitudes[1]) / 2
     recent = (magnitudes[2] + magnitudes[3]) / 2
 
@@ -127,129 +181,154 @@ def _analyze_macd_momentum(macd_data, direction):
             f"Qarama-qarshi MACD momentum {change:.1f}% kuchaymoqda",
         )
 
-    return "OPPOSING_UNCLEAR", "MACD qarama-qarshi, momentum aniq emas"
+    return "OPPOSING_UNCLEAR", "MACD qarama-qarshi, momentum noaniq"
 
 
 def _check_m30_momentum(direction, indicators):
     if not indicators:
-        return True, ["M30 MACD neytral"]
+        return True, ["M30 MACD tekshiruvi mavjud emas"]
 
     state, message = _analyze_macd_momentum(
         indicators.get("macd"),
         direction,
     )
 
-    if state == "OPPOSING_STRENGTHENING":
-        return False, [f"M30 MACD qarama-qarshi kuchaymoqda: {message}"]
+    if state in (
+        "OPPOSING_STRENGTHENING",
+        "OPPOSING_UNCLEAR",
+        "UNKNOWN",
+    ):
+        return False, [f"M30 MACD blokladi: {message}"]
 
-    return True, [message]
+    return True, [f"M30: {message}"]
 
 
-def _check_direction(direction, indicators, structure, candles, m30_indicators):
+def _check_direction(
+    direction,
+    indicators,
+    structure,
+    candles,
+    m30_indicators=None,
+):
     if direction not in ("BULLISH", "BEARISH"):
         return False, ["Aniq yo'nalish topilmadi"]
 
     confirmations = []
+    blockers = []
     observations = []
 
     expected = 1 if direction == "BULLISH" else -1
 
-    # Supertrend
-    st = _last_valid(indicators["supertrend"]["direction"])
+    # 1. Supertrend
+    supertrend = indicators.get("supertrend", {})
+    st = _last_valid(supertrend.get("direction"))
 
     if st == expected:
         confirmations.append("M15 Supertrend tasdiqladi")
     else:
-        observations.append("M15 Supertrend tasdiqlamadi")
+        blockers.append("M15 Supertrend yo'nalishga qarshi")
 
-    # RSI
-    rsi = _last_valid(indicators["rsi_14"])
+    # 2. RSI
+    rsi = _last_valid(indicators.get("rsi_14"))
 
-    if rsi is not None:
-        if direction == "BULLISH" and 48 < rsi < 78:
-            confirmations.append(f"RSI BUY: {rsi:.2f}")
-        elif direction == "BEARISH" and 22 < rsi < 52:
-            confirmations.append(f"RSI SELL: {rsi:.2f}")
-        else:
-            observations.append(f"RSI mos emas: {rsi:.2f}")
+    if rsi is None:
+        blockers.append("RSI ma'lumotlari mavjud emas")
+    elif direction == "BULLISH" and 48 < rsi < 78:
+        confirmations.append(f"RSI BUY: {rsi:.2f}")
+    elif direction == "BEARISH" and 22 < rsi < 52:
+        confirmations.append(f"RSI SELL: {rsi:.2f}")
     else:
-        observations.append("RSI mavjud emas")
+        blockers.append(f"RSI mos emas: {rsi:.2f}")
 
-    # ADX
-    adx = _last_valid(indicators["adx"]["adx"])
+    # 3. ADX
+    adx_data = indicators.get("adx", {})
+    adx = _last_valid(adx_data.get("adx"))
 
-    if adx is not None and adx >= MINIMUM_ADX:
+    if adx is None or adx < MINIMUM_ADX:
+        blockers.append(f"ADX yetarli emas: {adx}")
+    else:
         confirmations.append(f"ADX: {adx:.2f}")
-    else:
-        observations.append(f"ADX yetarli emas: {adx}")
 
-    # MACD
+    # 4. MACD
     macd_state, macd_message = _analyze_macd_momentum(
-        indicators["macd"],
+        indicators.get("macd"),
         direction,
     )
 
-    # Qarama-qarshi MACD kuchli bo'lsa, aynan shu yo'nalish bloklanadi.
-    if macd_state == "OPPOSING_STRENGTHENING":
-        return False, [f"MACD qarama-qarshi kuchaymoqda: {macd_message}"]
-
-    if macd_state in ("ALIGNED", "OPPOSING_WEAKENING"):
-        confirmations.append(macd_message)
+    if macd_state in (
+        "UNKNOWN",
+        "OPPOSING_UNCLEAR",
+        "OPPOSING_STRENGTHENING",
+    ):
+        blockers.append(f"MACD blokladi: {macd_message}")
     else:
         observations.append(macd_message)
 
-    # Market structure
-    if structure["trend"] == direction:
+        if macd_state in ("ALIGNED", "OPPOSING_WEAKENING"):
+            confirmations.append(macd_message)
+
+    # 5. Market structure
+    structure_trend = structure.get("trend", "UNKNOWN")
+
+    if structure_trend == direction:
         confirmations.append("Market structure tasdiqladi")
     else:
-        recent_ts = {
+        recent_timestamps = {
             candle.timestamp
             for candle in candles[-RECENT_STRUCTURE_CANDLES:]
         }
 
+        events = structure.get("events", [])
+
         recent_events = [
-            event for event in structure["events"]
-            if event.timestamp in recent_ts and event.direction == direction
+            event for event in events
+            if event.timestamp in recent_timestamps
+            and event.direction == direction
         ]
 
         if recent_events:
             confirmations.append("Yaqinda BOS/CHOCH tasdiqlandi")
         else:
-            observations.append("Mos BOS/CHOCH topilmadi")
+            blockers.append("Mos BOS/CHOCH topilmadi")
 
-    # M30 momentum tasdig'i
-    m30_ok, m30_reasons = _check_m30_momentum(
-        direction,
-        m30_indicators,
-    )
+    # 6. M30 MACD momentum
+    if m30_indicators is not None:
+        m30_ok, m30_reasons = _check_m30_momentum(
+            direction,
+            m30_indicators,
+        )
 
-    if not m30_ok:
-        return False, m30_reasons
+        if not m30_ok:
+            blockers.extend(m30_reasons)
+        else:
+            observations.extend(m30_reasons)
 
-    observations.extend(m30_reasons)
-
-    # Liquidity sweep
-    recent_ts = {
+    # 7. Liquidity sweep — qo'shimcha tasdiq
+    recent_timestamps = {
         candle.timestamp
         for candle in candles[-RECENT_LIQUIDITY_CANDLES:]
     }
 
-    sweeps = [
-        sweep for sweep in structure["liquidity_sweeps"]
-        if sweep.timestamp in recent_ts and sweep.direction == direction
+    sweeps = structure.get("liquidity_sweeps", [])
+
+    matching_sweeps = [
+        sweep for sweep in sweeps
+        if sweep.timestamp in recent_timestamps
+        and sweep.direction == direction
     ]
 
-    if sweeps:
+    if matching_sweeps:
         confirmations.append("Liquidity sweep tasdiqlandi")
 
     if len(confirmations) < MINIMUM_ENTRY_CONFIRMATIONS:
-        return False, [
-            f"Tasdiqlar yetarli emas: {len(confirmations)}/"
-            f"{MINIMUM_ENTRY_CONFIRMATIONS}",
-            *observations,
-        ]
+        blockers.append(
+            f"Tasdiqlar yetarli emas: "
+            f"{len(confirmations)}/{MINIMUM_ENTRY_CONFIRMATIONS}"
+        )
 
-    return True, confirmations + observations
+    reasons = blockers + confirmations + observations
+
+    return len(blockers) == 0, reasons
 
 
 def _build_trade_result(
@@ -269,14 +348,14 @@ def _build_trade_result(
         indicators,
         structure,
         candles,
-        m30_indicators,
+        m30_indicators=m30_indicators,
     )
 
     if not confirmed:
         return None, reasons
 
     entry = candles[-1].close
-    atr = _last_valid(indicators["atr_14"])
+    atr = _last_valid(indicators.get("atr_14"))
 
     if atr is None or atr <= 0:
         return None, ["ATR mavjud emas yoki noto'g'ri"]
@@ -285,17 +364,17 @@ def _build_trade_result(
     distance = atr * STOP_ATR_MULTIPLIER
 
     if side == "BUY":
-        sl = entry - distance
-        tp = entry + distance * MINIMUM_RR
+        stop_loss = entry - distance
+        take_profit = entry + distance * MINIMUM_RR
     else:
-        sl = entry + distance
-        tp = entry - distance * MINIMUM_RR
+        stop_loss = entry + distance
+        take_profit = entry - distance * MINIMUM_RR
 
     validation = validate_trade(
         side=side,
         entry=entry,
-        stop_loss=sl,
-        take_profit=tp,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
         atr_value=atr,
         minimum_rr=MINIMUM_RR,
     )
@@ -303,37 +382,41 @@ def _build_trade_result(
     if not validation.valid:
         return None, validation.reasons
 
-    adx = _last_valid(indicators["adx"]["adx"]) or 0.0
-    confidence = min(85.0, strength * 0.7 + min(adx, 50.0) * 0.6)
+    adx = _last_valid(
+        indicators.get("adx", {}).get("adx")
+    ) or 0.0
+
+    confidence = min(
+        85.0,
+        strength * 0.7 + min(adx, 50.0) * 0.6,
+    )
 
     signal = Signal(
         symbol=symbol,
         timeframe=timeframe_label,
         side=side,
         entry=entry,
-        stop_loss=sl,
-        take_profit=tp,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
         risk_reward=MINIMUM_RR,
         confidence=round(confidence, 2),
         reason="; ".join(reasons),
     )
 
-    return AnalysisResult(
+    result = AnalysisResult(
         symbol=symbol,
         timeframe=timeframe_label,
         signal=signal,
         trend=trend_label,
         strength=round(strength, 2),
         reasons=tuple(reasons),
-    ), reasons
+    )
+
+    return result, reasons
 
 
 def analyze_symbol(symbol, candles_by_timeframe):
-    """
-    Natija: AnalysisResult obyektlari ro'yxati.
-    Bir instrumentdan MAIN va COUNTER-TREND signallari chiqishi mumkin.
-    """
-
+    # Barcha timeframe ma'lumotlarini tekshirish
     for timeframe in TIMEFRAMES:
         candles = candles_by_timeframe.get(timeframe, [])
 
@@ -347,7 +430,7 @@ def analyze_symbol(symbol, candles_by_timeframe):
                 f"{timeframe} data rejected: "
                 + "; ".join(validation.reasons)
             )
-            return [_hold_result(symbol, reason)]
+            return AnalysisBatch([_hold_result(symbol, reason)])
 
     mtf = analyze_mtf(candles_by_timeframe)
 
@@ -355,34 +438,33 @@ def analyze_symbol(symbol, candles_by_timeframe):
     alignment = mtf["alignment_percent"]
 
     if overall not in ("BULLISH", "BEARISH"):
-        return [
+        return AnalysisBatch([
             _hold_result(
                 symbol,
                 "Katta timeframe'larda aniq yo'nalish yo'q",
                 overall,
                 alignment,
             )
-        ]
+        ])
 
     m15 = candles_by_timeframe["M15"]
     m30 = candles_by_timeframe["M30"]
+
     m30_indicators = calculate_indicators(m30)
 
     results = []
 
-    # -------------------------------------------------
-    # 1. MAIN SIGNAL — katta timeframe yo'nalishi
-    # -------------------------------------------------
+    # MAIN signal uchun MTF filtrlar
     main_blockers = []
 
     if alignment < MINIMUM_ALIGNMENT:
         main_blockers.append(
-            f"MTF mosligi past: {alignment:.2f}%"
+            f"MTF alignment past: {alignment:.2f}%"
         )
 
     if not mtf["higher_confirmation"]:
         main_blockers.append(
-            "D1/H4/H1 tasdig'i yetarli emas"
+            "D1, H4 and H1 tasdig'i yetarli emas"
         )
 
     if not mtf["lower_confirmation"]:
@@ -390,45 +472,44 @@ def analyze_symbol(symbol, candles_by_timeframe):
             "M30 katta timeframe yo'nalishini tasdiqlamadi"
         )
 
+    # MTF bloklasa ham M15 diagnostikasi ishlaydi
+    main_result, main_reasons = _build_trade_result(
+        symbol=symbol,
+        direction=overall,
+        candles=m15,
+        m30_indicators=m30_indicators,
+        trend_label=overall,
+        strength=alignment,
+        timeframe_label="M15",
+    )
+
     if main_blockers:
+        combined = main_blockers + main_reasons
         results.append(
             _hold_result(
                 symbol,
-                "; ".join(main_blockers),
+                "; ".join(combined),
                 overall,
                 alignment,
             )
         )
+    elif main_result is not None:
+        main_result.signal.reason = (
+            "MAIN SIGNAL | " + main_result.signal.reason
+        )
+        results.append(main_result)
     else:
-        main_result, main_reasons = _build_trade_result(
-            symbol=symbol,
-            direction=overall,
-            candles=m15,
-            m30_indicators=m30_indicators,
-            trend_label=overall,
-            strength=alignment,
-            timeframe_label="M15",
+        results.append(
+            _hold_result(
+                symbol,
+                "MAIN signal tasdiqlanmadi: "
+                + "; ".join(main_reasons),
+                overall,
+                alignment,
+            )
         )
 
-        if main_result:
-            main_result.signal.reason = (
-                "MAIN SIGNAL | " + main_result.signal.reason
-            )
-            results.append(main_result)
-        else:
-            results.append(
-                _hold_result(
-                    symbol,
-                    "MAIN signal tasdiqlanmadi: "
-                    + "; ".join(main_reasons),
-                    overall,
-                    alignment,
-                )
-            )
-
-    # -------------------------------------------------
-    # 2. COUNTER-TREND — M15 va M30 mustaqil tekshiruvi
-    # -------------------------------------------------
+    # COUNTER-TREND: M15 va M30 mustaqil yo'nalishi
     m15_trend = analyze_single_timeframe(m15, "M15")
     m30_trend = analyze_single_timeframe(m30, "M30")
 
@@ -458,12 +539,11 @@ def analyze_symbol(symbol, candles_by_timeframe):
             timeframe_label="M15-CT",
         )
 
-        if counter_result:
+        if counter_result is not None:
             counter_result.signal.reason = (
-                f"COUNTER-TREND SIGNAL | "
-                f"Katta trend: {overall} | "
+                f"COUNTER-TREND SIGNAL | Katta trend: {overall} | "
                 + counter_result.signal.reason
             )
             results.append(counter_result)
 
-    return results
+    return AnalysisBatch(results)
